@@ -132,6 +132,10 @@ venv.bak/
 .spyderproject
 .spyproject
 
+# VSCode
+/.vscode
+**.egg-info
+
 # Rope project settings
 .ropeproject
 
