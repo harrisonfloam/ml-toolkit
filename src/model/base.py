@@ -1,36 +1,3 @@
-"""
-This module defines the abstract base model class and a generic wrapper for any estimator.
-
-Usage Example:
-
-    from model.base import GenericWrapper
-    from sklearn.linear_model import LogisticRegression
-
-    # Initialize a scikit-learn estimator
-    estimator = LogisticRegression()
-
-    # Wrap the estimator using the GenericWrapper
-    model = GenericWrapper(estimator)
-
-    # Train the model
-    model.fit(X_train, y_train)
-
-    # Make predictions
-    predictions = model.predict(X_test)
-
-    # Evaluate if the estimator supports scoring
-    try:
-        score = model.score(X_test, y_test)
-    except NotImplementedError:
-        score = None
-
-    # Persist the model to disk
-    model.save("model.pkl")
-
-    # Load the model later
-    model = GenericWrapper.load("model.pkl")
-"""
-
 from __future__ import annotations
 
 import pickle
@@ -68,7 +35,7 @@ class AbstractBaseModel(ABC):
             return pickle.load(f)
 
 
-class GenericModel(AbstractBaseModel):
+class GenericModelAdapter(AbstractBaseModel):
     """
     A wrapper for any estimator supporting fit and predict.
     Uses pickle for model persistence.
@@ -77,7 +44,7 @@ class GenericModel(AbstractBaseModel):
     def __init__(self, estimator: object):
         self.estimator = estimator
 
-    def fit(self, *args, **kwargs) -> GenericModel:
+    def fit(self, *args, **kwargs) -> GenericModelAdapter:
         self.estimator.fit(*args, **kwargs)
         return self
 
@@ -87,4 +54,4 @@ class GenericModel(AbstractBaseModel):
     def score(self, X, y) -> float:
         if hasattr(self.estimator, "score"):
             return self.estimator.score(X, y)
-        raise NotImplementedError("Underlying estimator does not support scoring.")
+        raise NotImplementedError(f"{type(self.estimator)} does not support scoring.")
