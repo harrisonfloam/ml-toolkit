@@ -1,4 +1,3 @@
-import os
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +36,7 @@ class Settings(BaseSettings):
     # Logging settings
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     dep_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "WARNING"
+    string_max_length: int = 500  # Max length for string truncation in logs
 
     @property
     def logging_config(self) -> dict:
