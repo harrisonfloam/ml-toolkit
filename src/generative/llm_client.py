@@ -1,12 +1,13 @@
 """Unified LLM Client
 
-A single-class LLM client that handles OpenAI and Ollama providers
+A single-class LLM client that handles OpenAI, Ollama, and Mistral providers
 with support for sync/async, streaming, and structured outputs.
 
 Features:
 - Supports standard chat completions and structured outputs
 - Async and streaming support
 - Built-in logging with callbacks
+- Factory methods for different providers (from_openai, from_mistral)
 """
 
 import json
@@ -14,12 +15,10 @@ import logging
 from typing import Any, AsyncIterator, Optional, TypeVar, Union
 
 import instructor
-from openai.types.chat import ChatCompletion
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ..utils.callbacks import CallbackMeta, with_callbacks
 from ..utils.logging import truncate_long_strings
-from .settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,37 +27,69 @@ ChatMessage = dict[str, Any]
 T = TypeVar("T", bound=BaseModel)
 
 
-class LLMResponse(BaseModel):
-    """Default response model for structured outputs."""
-
-    response: str = Field(..., description="The generated text from the LLM")
-
-
 class LLMClient(metaclass=CallbackMeta):
-    """Unified LLM client supporting OpenAI and Ollama.
+    """Unified LLM client supporting OpenAI, Ollama, and Mistral providers.
+
+    Use factory methods for provider-specific initialization:
+        - LLMClient.from_openai() for OpenAI and Ollama (default)
+        - LLMClient.from_mistral() for Mistral AI
+
+    The default constructor delegates to from_openai() for backward compatibility.
 
     Args:
-        model: Default model name for all requests, can be specified per method call
+        model: Default model name for all requests
         temperature: Default temperature for all requests
-        is_async: Whether to initialize async client first, defaults to False for sync
-        base_url: Base URL for API, use for Ollama, leave None for OpenAI
-        api_key: API key, default from environment for OpenAI
-        is_mock: Placeholder for mock mode (TODO: implement mock functionality)
-        log_level: Logging level, default from settings
-        **openai_kwargs: Additional kwargs passed to OpenAI client initialization
+        base_url: Base URL for API (use for Ollama, leave None for OpenAI)
+        api_key: API key (None uses environment variable)
+        log_level: Logging level
+        **kwargs: Additional kwargs passed to client
     """
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        temperature: float = settings.temperature,
-        is_async: bool = False,
+        model: str,
+        temperature: float = 0.7,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        is_mock: bool = False,  # TODO: implement mock functionality
-        log_level: str = settings.log_level,
-        **openai_kwargs,
+        log_level: str = "INFO",
+        **kwargs,
     ):
+        """Create an LLMClient for OpenAI or Ollama (default factory).
+
+        For Mistral, use LLMClient.from_mistral() instead.
+
+        Args:
+            model: Model name (e.g., "gpt-4", "llama3.2:1b")
+            temperature: Default temperature for all requests
+            base_url: Base URL (use for Ollama, leave None for OpenAI)
+            api_key: API key (None uses environment variable)
+            log_level: Logging level
+            **kwargs: Additional kwargs passed to client
+        """
+        # Delegate to from_openai factory
+        instance = self.from_openai(
+            model=model,
+            temperature=temperature,
+            base_url=base_url,
+            api_key=api_key,
+            log_level=log_level,
+            **kwargs,
+        )
+        # Copy all attributes from the factory-created instance
+        self.__dict__.update(instance.__dict__)
+
+    def _init_from_factory(
+        self,
+        model: str,
+        sync_client: Any,  # type: ignore
+        async_client: Any,  # type: ignore
+        sync_instructor: Any,  # type: ignore
+        async_instructor: Any,  # type: ignore
+        temperature: float = 0.7,
+        base_url: Optional[str] = None,
+        log_level: str = "INFO",
+    ):
+        """Internal initialization called by factory methods, not for direct use."""
         # Set up logging
         logger.setLevel(log_level.upper())
         logger.debug(f"{self.__class__.__name__} initialized")
@@ -66,54 +97,130 @@ class LLMClient(metaclass=CallbackMeta):
         # Store defaults
         self.model = model
         self.temperature = temperature
-        self.is_async = is_async
+        self.base_url = base_url
 
-        self.is_mock = is_mock
+        # Store pre-configured clients
+        self.sync_client = sync_client
+        self.async_client = async_client
+        self.sync_instructor = sync_instructor
+        self.async_instructor = async_instructor
 
-        # Store client kwargs for lazy initialization
-        self._client_kwargs = {}
+    @classmethod
+    def from_openai(
+        cls,
+        model: str,
+        temperature: float = 0.7,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        log_level: str = "INFO",
+        **openai_kwargs,
+    ) -> "LLMClient":
+        """Create an LLMClient for OpenAI or Ollama.
+
+        Args:
+            model: Default model for all requests
+            temperature: Default temperature for all requests
+            base_url: Base URL
+            api_key: API key, leave None to use environment variable
+            log_level: Logging level, default "INFO"
+            **openai_kwargs: Additional kwargs passed to OpenAI client
+
+        Returns:
+            LLMClient instance configured for OpenAI/Ollama
+        """
+        import openai  # Import only when needed
+
+        # Build client kwargs
+        kwargs = openai_kwargs.copy()
         if base_url:
-            self._client_kwargs["base_url"] = base_url
+            kwargs["base_url"] = base_url
         if api_key:
-            self._client_kwargs["api_key"] = api_key
-        self._client_kwargs.update(openai_kwargs)
+            kwargs["api_key"] = api_key
 
-        # Lazy initialization - client created on first use
-        # TODO: get rid of these attributes
-        self._client = None
-        self._instructor = None
-        self._in_async_context = is_async
+        # Create both sync and async clients
+        sync_client = openai.OpenAI(**kwargs)
+        async_client = openai.AsyncOpenAI(**kwargs)
 
-    @property
-    def client(self):
-        """Lazily initialized OpenAI client, switches between sync/async as needed."""
-        if self._client is None or self._in_async_context != self.is_async:
-            import openai
+        # Wrap with instructor for structured outputs
+        sync_instructor = instructor.from_openai(sync_client, mode=instructor.Mode.JSON)
+        async_instructor = instructor.from_openai(
+            async_client, mode=instructor.Mode.JSON
+        )
 
-            if self._in_async_context:
-                self._client = openai.AsyncOpenAI(**self._client_kwargs)
-            else:
-                self._client = openai.OpenAI(**self._client_kwargs)
-            self.is_async = self._in_async_context
-            self._instructor = None  # Reset instructor when switching
-        return self._client
+        # Create instance and initialize
+        instance = cls.__new__(cls)
+        instance._init_from_factory(
+            model=model,
+            sync_client=sync_client,
+            async_client=async_client,
+            sync_instructor=sync_instructor,
+            async_instructor=async_instructor,
+            temperature=temperature,
+            base_url=base_url,
+            log_level=log_level,
+        )
+        return instance
 
-    @property
-    def instructor_client(self):
-        """Lazily initialized Instructor client, matches current client sync/async state."""
-        # Access self.client to ensure it's initialized and in correct mode
-        _ = self.client
+    @classmethod
+    def from_mistral(
+        cls,
+        model: str,
+        server_url: str,
+        api_key: str,
+        temperature: float = 0.7,
+        log_level: str = "INFO",
+        **mistral_kwargs,
+    ) -> "LLMClient":
+        """Create an LLMClient for Mistral AI.
 
-        if self._instructor is None:
-            self._instructor = instructor.from_openai(
-                self._client,  # type: ignore
-                mode=instructor.Mode.JSON,
-            )
-        return self._instructor
+        Args:
+            model: Model name (e.g., "mistral-medium-latest")
+            server_url: Mistral API server URL
+            api_key: Mistral API key
+            temperature: Default temperature for all requests
+            log_level: Logging level
+            **mistral_kwargs: Additional kwargs passed to Mistral client
 
-    def _set_async_mode(self, is_async: bool):
-        """Context setter to switch between sync/async mode."""
-        self._in_async_context = is_async
+        Returns:
+            LLMClient instance configured for Mistral
+        """
+        from mistralai import Mistral  # type: ignore
+
+        # Build client kwargs
+        kwargs = mistral_kwargs.copy()
+        kwargs["server_url"] = server_url
+        kwargs["api_key"] = api_key
+
+        # Create a single Mistral client (handles both sync and async)
+        mistral_client = Mistral(**kwargs)
+
+        # Mistral uses the same client for both sync and async
+        # sync uses client.chat.complete(), async uses client.chat.complete_async()
+        sync_client = async_client = mistral_client
+
+        # Wrap with instructor for structured outputs
+        # Use instructor.from_mistral for sync
+        sync_instructor = instructor.from_mistral(  # type: ignore
+            sync_client, mode=instructor.Mode.MISTRAL_TOOLS, use_async=False
+        )
+        # Use instructor.from_mistral for async
+        async_instructor = instructor.from_mistral(  # type: ignore
+            async_client, mode=instructor.Mode.MISTRAL_TOOLS, use_async=True
+        )
+
+        # Create instance and initialize
+        instance = cls.__new__(cls)
+        instance._init_from_factory(
+            model=model,
+            sync_client=sync_client,
+            async_client=async_client,
+            sync_instructor=sync_instructor,
+            async_instructor=async_instructor,
+            temperature=temperature,
+            base_url=server_url,  # Map server_url to base_url internally
+            log_level=log_level,
+        )
+        return instance
 
     @with_callbacks
     def chat(
@@ -124,13 +231,13 @@ class LLMClient(metaclass=CallbackMeta):
         response_format: Optional[type[T]] = None,
         max_retries: Optional[int] = 3,
         **kwargs,
-    ) -> Union[ChatCompletion, T]:
+    ) -> Union[Any, T]:  # type: ignore
         """Synchronous chat completion.
 
         Args:
             messages: List of message dicts with 'role' and 'content' keys
-            model: Model name, overrides default if provided
-            temperature: Temperature, overrides default if provided
+            model: Model name, overrides instance default if provided
+            temperature: Temperature, overrides instance default if provided
             response_format: Optional Pydantic model for structured output
             max_retries: Maximum retries for Instructor validation if using response_format
             **kwargs: Additional arguments passed to the API
@@ -138,34 +245,34 @@ class LLMClient(metaclass=CallbackMeta):
         Returns:
             ChatCompletion object if response_format is None or instance of response_format
         """
-        model = model or self.model or settings.model_name
-        temperature = temperature or self.temperature
-
-        # If response_format is provided, use instructor
-        if response_format is not None:
-            self._set_async_mode(False)
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "response_model": response_format,
-                "max_retries": max_retries,
-                **kwargs,
-            }
-
-            return self.instructor_client.chat.completions.create(**payload)
-
-        # Otherwise, use normal OpenAI client
-        self._set_async_mode(False)
+        model = model or self.model
+        temperature = temperature if temperature is not None else self.temperature
 
         payload = {
             "model": model,
-            "messages": messages,  # type: ignore
+            "messages": messages,
             "temperature": temperature,
             **kwargs,
         }
 
-        return self.client.chat.completions.create(stream=False, **payload)  # type: ignore
+        # If response_format is provided, use instructor
+        if response_format is not None:
+            # Instructor wraps both OpenAI and Mistral with unified API
+            return self.sync_instructor.chat.completions.create(  # type: ignore
+                response_model=response_format,
+                max_retries=max_retries,  # type: ignore
+                **payload,
+            )
+
+        # Otherwise, use normal client
+        # Check if it's Mistral (has 'complete' method) or OpenAI (has 'completions')
+        # TODO: clean this up
+        if hasattr(self.sync_client.chat, "complete"):
+            # Mistral API
+            return self.sync_client.chat.complete(**payload)  # type: ignore
+        else:
+            # OpenAI API
+            return self.sync_client.chat.completions.create(stream=False, **payload)  # type: ignore
 
     @with_callbacks
     async def achat(
@@ -176,13 +283,13 @@ class LLMClient(metaclass=CallbackMeta):
         response_format: Optional[type[T]] = None,
         max_retries: Optional[int] = 3,
         **kwargs,
-    ) -> Union[ChatCompletion, T]:
+    ) -> Union[Any, T]:  # type: ignore
         """Asynchronous chat completion.
 
         Args:
             messages: List of message dicts with 'role' and 'content' keys
-            model: Model name, overrides default if provided
-            temperature: Temperature, overrides default if provided
+            model: Model name, overrides instance default if provided
+            temperature: Temperature, overrides instance default if provided
             response_format: Optional Pydantic model for structured output
             max_retries: Maximum retries for Instructor validation if using response_format
             **kwargs: Additional arguments passed to the API
@@ -190,138 +297,113 @@ class LLMClient(metaclass=CallbackMeta):
         Returns:
             ChatCompletion object if response_format is None or instance of response_format
         """
-        model = model or self.model or settings.model_name
-        temperature = temperature or self.temperature
-
-        # If response_format is provided, use instructor
-        if response_format is not None:
-            self._set_async_mode(True)
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "response_model": response_format,
-                "max_retries": max_retries,
-                **kwargs,
-            }
-
-            return await self.instructor_client.chat.completions.create(**payload)
-
-        # Otherwise, use normal OpenAI client
-        self._set_async_mode(True)
+        model = model or self.model
+        temperature = temperature if temperature is not None else self.temperature
 
         payload = {
             "model": model,
-            "messages": messages,  # type: ignore
+            "messages": messages,
             "temperature": temperature,
             **kwargs,
         }
 
-        return await self.client.chat.completions.create(stream=False, **payload)  # type: ignore
+        # If response_format is provided, use instructor
+        if response_format is not None:
+            # Instructor wraps both OpenAI and Mistral with unified API
+            return await self.async_instructor.chat.completions.create(  # type: ignore
+                response_model=response_format,
+                max_retries=max_retries,  # type: ignore
+                **payload,
+            )
+
+        # Otherwise, use normal client
+        # Check if it's Mistral (has 'complete_async' method) or OpenAI (has 'completions')
+        if hasattr(self.async_client.chat, "complete_async"):
+            # Mistral API
+            return await self.async_client.chat.complete_async(**payload)  # type: ignore
+        else:
+            # OpenAI API
+            return await self.async_client.chat.completions.create(
+                stream=False, **payload
+            )  # type: ignore
 
     @with_callbacks
     def generate(
         self,
-        messages: list[ChatMessage],
+        prompt: str,
+        system_prompt: Optional[str] = None,
         response_format: Optional[type[T]] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
         max_retries: Optional[int] = 3,
         **kwargs,
-    ) -> Union[ChatCompletion, T]:
+    ) -> Union[Any, T]:  # type: ignore
         """Synchronous generation with optional structured output.
 
         Args:
-            messages: List of message dicts with 'role' and 'content' keys
+            prompt: The user prompt/message
+            system_prompt: Optional system message to prepend
             response_format: Optional Pydantic model for structured output
-            model: Model name, overrides default if provided
-            temperature: Temperature, overrides default if provided
+            model: Model name, overrides instance default if provided
+            temperature: Temperature, overrides instance default if provided
             max_retries: Maximum retries for Instructor validation if using response_format
             **kwargs: Additional arguments passed to the API
 
         Returns:
             Instance of response_format if provided or ChatCompletion object
         """
-        model = model or self.model or settings.model_name
-        temperature = temperature or self.temperature
+        messages: list[ChatMessage] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
 
-        # If response_format is provided, use instructor
-        if response_format is not None:
-            self._set_async_mode(False)
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "response_model": response_format,
-                "max_retries": max_retries,
-                **kwargs,
-            }
-
-            return self.instructor_client.chat.completions.create(**payload)
-
-        # Otherwise, use normal OpenAI client for regular completion
-        self._set_async_mode(False)
-
-        payload = {
-            "model": model,
-            "messages": messages,  # type: ignore
-            "temperature": temperature,
+        return self.chat(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            response_format=response_format,
+            max_retries=max_retries,
             **kwargs,
-        }
-
-        return self.client.chat.completions.create(stream=False, **payload)  # type: ignore
+        )
 
     @with_callbacks
     async def agenerate(
         self,
-        messages: list[ChatMessage],
+        prompt: str,
+        system_prompt: Optional[str] = None,
         response_format: Optional[type[T]] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
         max_retries: Optional[int] = 3,
         **kwargs,
-    ) -> Union[ChatCompletion, T]:
+    ) -> Union[Any, T]:  # type: ignore
         """Asynchronous generation with optional structured output.
 
         Args:
-            messages: List of message dicts with 'role' and 'content' keys
+            prompt: The user prompt/message
+            system_prompt: Optional system message to prepend
             response_format: Optional Pydantic model for structured output
-            model: Model name, overrides default if provided
-            temperature: Temperature, overrides default if provided
+            model: Model name, overrides instance default if provided
+            temperature: Temperature, overrides instance default if provided
             max_retries: Maximum retries for Instructor validation if using response_format
             **kwargs: Additional arguments passed to the API
 
         Returns:
             Instance of response_format if provided or ChatCompletion object
         """
-        model = model or self.model or settings.model_name
-        temperature = temperature or self.temperature
+        messages: list[ChatMessage] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
 
-        # If response_format is provided, use instructor
-        if response_format is not None:
-            self._set_async_mode(True)
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "response_model": response_format,
-                "max_retries": max_retries,
-                **kwargs,
-            }
-
-            return await self.instructor_client.chat.completions.create(**payload)
-
-        # Otherwise, use normal OpenAI client for regular completion
-        self._set_async_mode(True)
-
-        payload = {
-            "model": model,
-            "messages": messages,  # type: ignore
-            "temperature": temperature,
+        return await self.achat(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            response_format=response_format,
+            max_retries=max_retries,
             **kwargs,
-        }
-
-        return await self.client.chat.completions.create(stream=False, **payload)  # type: ignore
+        )
 
     async def stream(
         self,
@@ -336,21 +418,18 @@ class LLMClient(metaclass=CallbackMeta):
 
         Args:
             messages: List of message dicts with 'role' and 'content' keys
-            model: Model name, overrides default if provided
-            temperature: Temperature, overrides default if provided
+            model: Model name, overrides instance default if provided
+            temperature: Temperature, overrides instance default if provided
             **kwargs: Additional arguments passed to the API
 
         Yields:
             str: Content chunks during streaming
             dict: Final complete response with choices, model, and usage info
         """
-        model = model or self.model or settings.model_name
-        temperature = temperature or self.temperature
+        model = model or self.model
+        temperature = temperature if temperature is not None else self.temperature
 
-        self._set_async_mode(True)
-        assert model is not None, "model must be provided or set as default model"
-
-        completion_stream = await self.client.chat.completions.create(  # type: ignore
+        completion_stream = await self.async_client.chat.completions.create(  # type: ignore
             model=model,
             messages=messages,  # type: ignore
             temperature=temperature,
