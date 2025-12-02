@@ -12,7 +12,7 @@ Features:
 
 import json
 import logging
-from typing import Any, AsyncIterator, Optional, TypeVar, Union
+from typing import Any, AsyncIterator, Iterator, Optional, TypedDict, TypeVar, Union
 
 import instructor
 from pydantic import BaseModel
@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 # Type definitions
 ChatMessage = dict[str, Any]
 T = TypeVar("T", bound=BaseModel)
+
+
+class StreamResponse(TypedDict):
+    """Final response structure for streaming completions."""
+
+    choices: list[dict[str, Any]]
+    model: str
+    usage: dict[str, int]
 
 
 class LLMClient(metaclass=CallbackMeta):
@@ -88,6 +96,7 @@ class LLMClient(metaclass=CallbackMeta):
         temperature: float = 0.7,
         base_url: Optional[str] = None,
         log_level: str = "INFO",
+        provider: str = "openai",
     ):
         """Internal initialization called by factory methods, not for direct use."""
         # Set up logging
@@ -98,6 +107,7 @@ class LLMClient(metaclass=CallbackMeta):
         self.model = model
         self.temperature = temperature
         self.base_url = base_url
+        self.provider = provider
 
         # Store pre-configured clients
         self.sync_client = sync_client
@@ -158,6 +168,7 @@ class LLMClient(metaclass=CallbackMeta):
             temperature=temperature,
             base_url=base_url,
             log_level=log_level,
+            provider="openai",
         )
         return instance
 
@@ -219,6 +230,7 @@ class LLMClient(metaclass=CallbackMeta):
             temperature=temperature,
             base_url=server_url,  # Map server_url to base_url internally
             log_level=log_level,
+            provider="mistral",
         )
         return instance
 
@@ -228,6 +240,13 @@ class LLMClient(metaclass=CallbackMeta):
             return client.chat.complete(**payload)  # type: ignore
         else:  # OpenAI
             return client.chat.completions.create(stream=False, **payload)  # type: ignore
+
+    def _stream(self, client: Any, **payload):  # type: ignore
+        """Streaming method based on client type."""
+        if hasattr(client.chat, "stream"):  # Mistral
+            return client.chat.stream(**payload)  # type: ignore
+        else:  # OpenAI
+            return client.chat.completions.create(stream=True, **payload)  # type: ignore
 
     async def _acomplete(self, client: Any, **payload) -> Any:  # type: ignore
         """Async completion method based on client type."""
@@ -411,13 +430,68 @@ class LLMClient(metaclass=CallbackMeta):
             **kwargs,
         )
 
-    async def stream(
+    def stream(
         self,
         messages: list[ChatMessage],
         model: Optional[str] = None,
         temperature: Optional[float] = None,
         **kwargs,
-    ) -> AsyncIterator[Union[str, dict]]:
+    ) -> Iterator[Union[str, StreamResponse]]:
+        """Synchronous streaming chat completion.
+
+        Yields content chunks as strings, then a final dict with the complete response.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys
+            model: Model name, overrides instance default if provided
+            temperature: Temperature, overrides instance default if provided
+            **kwargs: Additional arguments passed to the API
+
+        Yields:
+            str: Content chunks during streaming
+            dict: Final complete response with choices, model, and usage info
+        """
+        model = model or self.model
+        temperature = temperature if temperature is not None else self.temperature
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            **kwargs,
+        }
+
+        # Get streaming response
+        completion_stream = self._stream(self.sync_client, **payload)
+
+        content_chunks = []
+        finish_reason = "stop"
+
+        for chunk in completion_stream:
+            if chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                content_chunks.append(content)
+                yield content
+            if chunk.choices[0].finish_reason:
+                finish_reason = chunk.choices[0].finish_reason
+
+        # Yield complete response object at the end
+        full_content = "".join(content_chunks)
+        yield {
+            "choices": [
+                {"message": {"content": full_content}, "finish_reason": finish_reason}
+            ],
+            "model": model,
+            "usage": {"prompt_tokens": 0, "completion_tokens": len(content_chunks)},
+        }
+
+    async def astream(
+        self,
+        messages: list[ChatMessage],
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        **kwargs,
+    ) -> AsyncIterator[Union[str, StreamResponse]]:
         """Asynchronous streaming chat completion.
 
         Yields content chunks as strings, then a final dict with the complete response.
