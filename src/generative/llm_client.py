@@ -222,6 +222,27 @@ class LLMClient(metaclass=CallbackMeta):
         )
         return instance
 
+    def _complete(self, client: Any, **payload) -> Any:  # type: ignore
+        """Call appropriate completion method based on client type."""
+        if hasattr(client.chat, "complete"):  # Mistral
+            return client.chat.complete(**payload)  # type: ignore
+        else:  # OpenAI
+            return client.chat.completions.create(stream=False, **payload)  # type: ignore
+
+    async def _acomplete(self, client: Any, **payload) -> Any:  # type: ignore
+        """Async completion method based on client type."""
+        if hasattr(client.chat, "complete_async"):  # Mistral
+            return await client.chat.complete_async(**payload)  # type: ignore
+        else:  # OpenAI
+            return await client.chat.completions.create(stream=False, **payload)  # type: ignore
+
+    async def _astream(self, client: Any, **payload):  # type: ignore
+        """Async streaming method based on client type."""
+        if hasattr(client.chat, "stream_async"):  # Mistral
+            return await client.chat.stream_async(**payload)  # type: ignore
+        else:  # OpenAI
+            return await client.chat.completions.create(stream=True, **payload)  # type: ignore
+
     @with_callbacks
     def chat(
         self,
@@ -264,15 +285,8 @@ class LLMClient(metaclass=CallbackMeta):
                 **payload,
             )
 
-        # Otherwise, use normal client
-        # Check if it's Mistral (has 'complete' method) or OpenAI (has 'completions')
-        # TODO: clean this up
-        if hasattr(self.sync_client.chat, "complete"):
-            # Mistral API
-            return self.sync_client.chat.complete(**payload)  # type: ignore
-        else:
-            # OpenAI API
-            return self.sync_client.chat.completions.create(stream=False, **payload)  # type: ignore
+        # Otherwise, use normal client (handles both OpenAI and Mistral)
+        return self._complete(self.sync_client, **payload)
 
     @with_callbacks
     async def achat(
@@ -316,16 +330,8 @@ class LLMClient(metaclass=CallbackMeta):
                 **payload,
             )
 
-        # Otherwise, use normal client
-        # Check if it's Mistral (has 'complete_async' method) or OpenAI (has 'completions')
-        if hasattr(self.async_client.chat, "complete_async"):
-            # Mistral API
-            return await self.async_client.chat.complete_async(**payload)  # type: ignore
-        else:
-            # OpenAI API
-            return await self.async_client.chat.completions.create(
-                stream=False, **payload
-            )  # type: ignore
+        # Otherwise, use normal client (handles both OpenAI and Mistral)
+        return await self._acomplete(self.async_client, **payload)
 
     @with_callbacks
     def generate(
@@ -429,13 +435,15 @@ class LLMClient(metaclass=CallbackMeta):
         model = model or self.model
         temperature = temperature if temperature is not None else self.temperature
 
-        completion_stream = await self.async_client.chat.completions.create(  # type: ignore
-            model=model,
-            messages=messages,  # type: ignore
-            temperature=temperature,
-            stream=True,
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
             **kwargs,
-        )
+        }
+
+        # Get streaming response (handles both OpenAI and Mistral)
+        completion_stream = await self._astream(self.async_client, **payload)
 
         content_chunks = []
         finish_reason = "stop"
