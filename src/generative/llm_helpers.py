@@ -1,7 +1,4 @@
-"""Simple helper functions for working with LLMs.
-
-No complex wrappers - just practical utilities for common patterns.
-"""
+"""Simple helper functions for working with LLMs."""
 
 from typing import Any, AsyncIterator, Iterator, Optional, TypeVar, cast
 
