@@ -1,4 +1,23 @@
-"""Simple helper functions for working with LLMs."""
+"""Simple helper functions for working with LLMs.
+
+Client Creation:
+    create_ollama_client(): OpenAI client for Ollama, sync or async
+    create_mistral_client(): OpenAI-compatible client for MistralAI, sync or async
+
+Completion Functions:
+    completion(): Simple completion
+    async_completion(): Async version of completion()
+    chat_completion(): Standard chat completion
+    async_chat_completion(): Async version of chat_completion()
+
+Streaming Functions:
+    stream_completion(): Streams text chunks, yields final ChatCompletion
+    async_stream_completion(): Async version of stream_completion()
+
+Mock Functions:
+    mock_chat_completion(): Mock chat response for testing
+    mock_stream_completion(): Mock streaming response for testing
+"""
 
 import logging
 import os
