@@ -32,7 +32,6 @@ def create_ollama_client(
     """Create an OpenAI client configured for Ollama.
 
     Args:
-        model: Optional default model (can override per-request)
         base_url: Ollama server URL (default: http://localhost:11434)
         **kwargs: Additional OpenAI client arguments
 
@@ -60,7 +59,6 @@ def create_async_ollama_client(
     """Create an async OpenAI client configured for Ollama.
 
     Args:
-        model: Optional default model (can override per-request)
         base_url: Ollama server URL (default: http://localhost:11434)
         **kwargs: Additional AsyncOpenAI client arguments
 
@@ -100,33 +98,25 @@ def completion(
         **kwargs: Additional arguments for chat.completions.create
 
     Returns:
-        Text response (str) or instance of response_model if provided
+        str if no response_model, otherwise instance of response_model
 
     Example:
-        >>> # Text response
-        >>> client = create_ollama_client()
         >>> text = completion(client, "What is 2+2?", model="llama3.2:1b")
-        >>>
-        >>> # Structured response
-        >>> from pydantic import BaseModel
-        >>> class Answer(BaseModel):
-        ...     result: int
-        >>> answer = completion(
-        ...     client, "What is 2+2?",
-        ...     model="llama3.2:1b",
-        ...     response_model=Answer
-        ... )
-        >>> print(answer.result)
+        >>> # With structured output:
+        >>> answer = completion(client, "What is 2+2?", model="llama3.2:1b", response_model=Answer)
     """
     messages: list[dict[str, Any]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
+    # Cast: our dicts match the ChatCompletionMessageParam protocol
+    msg_params = cast(list[ChatCompletionMessageParam], messages)
+
     if response_model:
         response = client.chat.completions.create(
             model=model,
-            messages=cast(list[ChatCompletionMessageParam], messages),
+            messages=msg_params,
             response_format=_build_response_format(response_model),
             **kwargs,
         )
@@ -134,10 +124,11 @@ def completion(
     else:
         response = client.chat.completions.create(
             model=model,
-            messages=cast(list[ChatCompletionMessageParam], messages),
+            messages=msg_params,
             **kwargs,
         )
-        return response.choices[0].message.content  # type: ignore
+        content = response.choices[0].message.content
+        return content or ""
 
 
 async def async_completion(
@@ -159,17 +150,19 @@ async def async_completion(
         **kwargs: Additional arguments for chat.completions.create
 
     Returns:
-        Text response (str) or instance of response_model if provided
+        str if no response_model, otherwise instance of response_model
     """
     messages: list[dict[str, Any]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
+    msg_params = cast(list[ChatCompletionMessageParam], messages)
+
     if response_model:
         response = await client.chat.completions.create(
             model=model,
-            messages=cast(list[ChatCompletionMessageParam], messages),
+            messages=msg_params,
             response_format=_build_response_format(response_model),
             **kwargs,
         )
@@ -177,10 +170,11 @@ async def async_completion(
     else:
         response = await client.chat.completions.create(
             model=model,
-            messages=cast(list[ChatCompletionMessageParam], messages),
+            messages=msg_params,
             **kwargs,
         )
-        return response.choices[0].message.content  # type: ignore
+        content = response.choices[0].message.content
+        return content or ""
 
 
 def chat_completion(
@@ -200,19 +194,18 @@ def chat_completion(
         **kwargs: Additional arguments for chat.completions.create
 
     Returns:
-        Text response (str) or instance of response_model if provided
+        str if no response_model, otherwise instance of response_model
 
     Example:
-        >>> messages = [
-        ...     {"role": "system", "content": "You are helpful"},
-        ...     {"role": "user", "content": "Hello"}
-        ... ]
+        >>> messages = [{"role": "user", "content": "Hello"}]
         >>> response = chat_completion(client, messages, model="llama3.2:1b")
     """
+    msg_params = cast(list[ChatCompletionMessageParam], messages)
+
     if response_model:
         response = client.chat.completions.create(
             model=model,
-            messages=cast(list[ChatCompletionMessageParam], messages),
+            messages=msg_params,
             response_format=_build_response_format(response_model),
             **kwargs,
         )
@@ -220,10 +213,11 @@ def chat_completion(
     else:
         response = client.chat.completions.create(
             model=model,
-            messages=cast(list[ChatCompletionMessageParam], messages),
+            messages=msg_params,
             **kwargs,
         )
-        return response.choices[0].message.content  # type: ignore
+        content = response.choices[0].message.content
+        return content or ""
 
 
 async def async_chat_completion(
@@ -243,12 +237,14 @@ async def async_chat_completion(
         **kwargs: Additional arguments for chat.completions.create
 
     Returns:
-        Text response (str) or instance of response_model if provided
+        str if no response_model, otherwise instance of response_model
     """
+    msg_params = cast(list[ChatCompletionMessageParam], messages)
+
     if response_model:
         response = await client.chat.completions.create(
             model=model,
-            messages=cast(list[ChatCompletionMessageParam], messages),
+            messages=msg_params,
             response_format=_build_response_format(response_model),
             **kwargs,
         )
@@ -256,10 +252,11 @@ async def async_chat_completion(
     else:
         response = await client.chat.completions.create(
             model=model,
-            messages=cast(list[ChatCompletionMessageParam], messages),
+            messages=msg_params,
             **kwargs,
         )
-        return response.choices[0].message.content  # type: ignore
+        content = response.choices[0].message.content
+        return content or ""
 
 
 def stream_completion(
@@ -280,17 +277,13 @@ def stream_completion(
         Text chunks as they arrive
 
     Example:
-        >>> client = create_ollama_client()
-        >>> for chunk in stream_completion(
-        ...     client,
-        ...     [{"role": "user", "content": "Write a story"}],
-        ...     model="llama3.2:1b"
-        ... ):
+        >>> for chunk in stream_completion(client, [{"role": "user", "content": "Hi"}], model="llama3.2:1b"):
         ...     print(chunk, end="", flush=True)
     """
+    msg_params = cast(list[ChatCompletionMessageParam], messages)
     stream = client.chat.completions.create(
         model=model,
-        messages=cast(list[ChatCompletionMessageParam], messages),
+        messages=msg_params,
         stream=True,
         **kwargs,
     )
@@ -318,17 +311,13 @@ async def async_stream_completion(
         Text chunks as they arrive
 
     Example:
-        >>> client = create_async_ollama_client()
-        >>> async for chunk in async_stream_completion(
-        ...     client,
-        ...     [{"role": "user", "content": "Write a story"}],
-        ...     model="llama3.2:1b"
-        ... ):
+        >>> async for chunk in async_stream_completion(client, [{"role": "user", "content": "Hi"}], model="llama3.2:1b"):
         ...     print(chunk, end="", flush=True)
     """
+    msg_params = cast(list[ChatCompletionMessageParam], messages)
     stream = await client.chat.completions.create(
         model=model,
-        messages=cast(list[ChatCompletionMessageParam], messages),
+        messages=msg_params,
         stream=True,
         **kwargs,
     )
