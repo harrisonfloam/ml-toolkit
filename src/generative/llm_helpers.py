@@ -24,7 +24,7 @@ import os
 import random
 import time
 from datetime import datetime
-from typing import Any, AsyncIterator, Iterator, Optional, TypeVar, cast, overload
+from typing import Any, AsyncIterator, Iterator, Optional, TypeVar, cast
 
 from openai import AsyncOpenAI, OpenAI
 from openai.types.chat import (
@@ -38,27 +38,10 @@ from openai.types.shared_params.response_format_json_schema import (
     ResponseFormatJSONSchema,
 )
 from pydantic import BaseModel
-from typing_extensions import Literal
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
-
-
-@overload
-def create_ollama_client(
-    base_url: str = "http://localhost:11434",
-    async_client: Literal[False] = False,
-    **kwargs,
-) -> OpenAI: ...
-
-
-@overload
-def create_ollama_client(
-    base_url: str = "http://localhost:11434",
-    async_client: Literal[True] = ...,
-    **kwargs,
-) -> AsyncOpenAI: ...
 
 
 def create_ollama_client(
@@ -94,24 +77,6 @@ def create_ollama_client(
             base_url=normalized_url,
             **kwargs,
         )
-
-
-@overload
-def create_mistral_client(
-    api_key: Optional[str] = None,
-    server_url: str = "https://api.mistral.ai",
-    async_client: Literal[False] = False,
-    **kwargs,
-) -> OpenAI: ...
-
-
-@overload
-def create_mistral_client(
-    api_key: Optional[str] = None,
-    server_url: str = "https://api.mistral.ai",
-    async_client: Literal[True] = ...,
-    **kwargs,
-) -> AsyncOpenAI: ...
 
 
 def create_mistral_client(
