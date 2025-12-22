@@ -24,7 +24,16 @@ import os
 import random
 import time
 from datetime import datetime
-from typing import Any, AsyncIterator, Iterator, Optional, TypeVar, cast
+from typing import (
+    Any,
+    AsyncIterator,
+    Iterator,
+    Literal,
+    Optional,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from openai import AsyncOpenAI, OpenAI
 from openai.types.chat import (
@@ -44,8 +53,27 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+@overload
 def create_ollama_client(
     base_url: str = "http://localhost:11434",
+    *,
+    async_client: Literal[False] = False,
+    **kwargs: Any,
+) -> OpenAI: ...
+
+
+@overload
+def create_ollama_client(
+    base_url: str = "http://localhost:11434",
+    *,
+    async_client: Literal[True],
+    **kwargs: Any,
+) -> AsyncOpenAI: ...
+
+
+def create_ollama_client(
+    base_url: str = "http://localhost:11434",
+    *,
     async_client: bool = False,
     **kwargs,
 ) -> OpenAI | AsyncOpenAI:
