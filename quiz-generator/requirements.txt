@@ -1,0 +1,25 @@
+numpy
+pandas
+tqdm
+
+# fastapi
+# uvicorn
+# watchfiles
+# python-multipart
+
+# httpx
+# requests
+
+semantic-text-splitter
+openai
+# instructor
+markitdown[pdf,docx]
+agent-framework
+# chromadb
+
+pydantic
+pydantic-settings
+
+streamlit
+
+pytest

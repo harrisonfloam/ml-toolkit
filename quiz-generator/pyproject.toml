@@ -1,0 +1,19 @@
+[project]
+name = "quiz-generator"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "agent-framework>=1.0.0b251120",
+    "markitdown[docx,pdf]>=0.1.4",
+    "numpy>=2.4.0",
+    "openai>=2.14.0",
+    "pandas>=2.3.3",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "pytest>=9.0.2",
+    "semantic-text-splitter>=0.28.0",
+    "streamlit>=1.52.2",
+    "tqdm>=4.67.1",
+]
