@@ -1909,7 +1909,7 @@ wheels = [
 [[package]]
 name = "quiz-generator"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "agent-framework" },
     { name = "markitdown", extra = ["docx", "pdf"] },
