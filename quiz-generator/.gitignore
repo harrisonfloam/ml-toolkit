@@ -2,6 +2,8 @@
 archive/
 .DS_Store
 .serena
+data/raw/
+DESIGN.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
