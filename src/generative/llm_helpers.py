@@ -98,17 +98,22 @@ def create_ollama_client(
     normalized_url = f"{base_url.rstrip('/')}/v1"
 
     if async_client:
-        return AsyncOpenAI(
+        # Tag provider as 'ollama'
+        ollama_client = AsyncOpenAI(
             api_key="ollama",
             base_url=normalized_url,
             **kwargs,
         )
+        setattr(ollama_client, "_llm_provider", "ollama")
+        return ollama_client
     else:
-        return OpenAI(
+        ollama_client = OpenAI(
             api_key="ollama",
             base_url=normalized_url,
             **kwargs,
         )
+        setattr(ollama_client, "_llm_provider", "ollama")
+        return ollama_client
 
 
 @overload
@@ -162,6 +167,9 @@ def create_mistral_client(
         )
 
     mistral_client = Mistral(api_key=resolved_api_key, server_url=server_url, **kwargs)
+
+    # Tag provider as 'mistralai'
+    setattr(mistral_client, "_llm_provider", "mistralai")
 
     # Create adapter class that maps OpenAI API to Mistral API
     class CompletionsAdapter:
