@@ -46,6 +46,7 @@ from openai.types.chat import (
     ChatCompletionMessageParam,
 )
 from openai.types.chat.chat_completion import Choice
+from openai.types.completion_usage import CompletionUsage
 from openai.types.shared_params.response_format_json_schema import (
     JSONSchema,
     ResponseFormatJSONSchema,
@@ -55,6 +56,14 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+FinishReason = Literal[
+    "stop",
+    "length",
+    "tool_calls",
+    "content_filter",
+    "function_call",
+]
 
 
 @overload
@@ -236,7 +245,9 @@ def completion(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    _log_chat_request(model=model, temperature=temperature, messages=messages)
+    _log_chat_request(
+        model=model, temperature=temperature, messages=messages, stream=False
+    )
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
     start_time = time.time()
@@ -288,7 +299,9 @@ async def async_completion(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    _log_chat_request(model=model, temperature=temperature, messages=messages)
+    _log_chat_request(
+        model=model, temperature=temperature, messages=messages, stream=False
+    )
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
     start_time = time.time()
@@ -337,7 +350,9 @@ def chat_completion(
         >>> messages = [{"role": "user", "content": "Hello"}]
         >>> response = chat_completion(client, "llama3.2:1b", messages)
     """
-    _log_chat_request(model=model, temperature=temperature, messages=messages)
+    _log_chat_request(
+        model=model, temperature=temperature, messages=messages, stream=False
+    )
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
     start_time = time.time()
@@ -382,7 +397,9 @@ async def async_chat_completion(
     Returns:
         str if no response_model, otherwise instance of response_model
     """
-    _log_chat_request(model=model, temperature=temperature, messages=messages)
+    _log_chat_request(
+        model=model, temperature=temperature, messages=messages, stream=False
+    )
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
     start_time = time.time()
@@ -429,10 +446,20 @@ def stream_completion(
         >>> for chunk in stream_completion(client, "llama3.2:1b", [{"role": "user", "content": "Hi"}]):
         ...     print(chunk, end="", flush=True)
     """
-    _log_chat_request(model=model, temperature=temperature, messages=messages)
+    _log_chat_request(
+        model=model, temperature=temperature, messages=messages, stream=True
+    )
     start_time = time.time()
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
+
+    # Set stream_options to include usage if not Mistral and not already set
+    if (
+        getattr(client, "_llm_provider", None) != "mistralai"
+        and "stream_options" not in kwargs
+    ):
+        kwargs["stream_options"] = {"include_usage": True}
+
     stream = client.chat.completions.create(
         model=model,
         messages=msg_params,
@@ -441,28 +468,51 @@ def stream_completion(
         **kwargs,
     )
 
-    duration = time.time() - start_time
-    logger.debug(
-        f"LLM stream started in {duration:.4f} s, model={model} temperature={temperature}"
-    )
-
     content_chunks: list[str] = []
-    finish_reason = "stop"
+    finish_reason: FinishReason = "stop"
+    usage = None
 
     for chunk in stream:
-        if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
-            piece = chunk.choices[0].delta.content
+        # Normalize shape:
+        # - OpenAI/Ollama: chunk has .choices/.usage
+        # - Mistral: event.data has .choices/.usage
+        data = getattr(chunk, "data", chunk)
+
+        chunk_usage = getattr(data, "usage", None)
+        if chunk_usage is not None:
+            usage = chunk_usage
+
+        choices = getattr(data, "choices", None)
+        if not choices:
+            # OpenAI stream_options include_usage emits a final usage-only chunk with choices=[]
+            continue
+
+        choice0 = choices[0]
+        piece = choice0.delta.content
+        if piece:
             content_chunks.append(piece)
             yield piece
-        if chunk.choices and chunk.choices[0].finish_reason:
-            finish_reason = chunk.choices[0].finish_reason
+
+        if choice0.finish_reason:
+            finish_reason = cast(FinishReason, choice0.finish_reason)
 
     full_content = "".join(content_chunks)
+    duration = time.time() - start_time
+    _log_chat_response(model=model, duration_s=duration, stream=True, usage=usage)
     yield ChatCompletion(
         id=f"chatcmpl-{model}-{datetime.now().timestamp()}",
         object="chat.completion",
         created=int(datetime.now().timestamp()),
         model=model,
+        usage=(
+            CompletionUsage(
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+            )
+            if usage
+            else None
+        ),
         choices=[
             Choice(
                 index=0,
@@ -496,10 +546,20 @@ async def async_stream_completion(
         >>> async for chunk in async_stream_completion(client, "llama3.2:1b", [{"role": "user", "content": "Hi"}]):
         ...     print(chunk, end="", flush=True)
     """
-    _log_chat_request(model=model, temperature=temperature, messages=messages)
+    _log_chat_request(
+        model=model, temperature=temperature, messages=messages, stream=True
+    )
     start_time = time.time()
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
+
+    # Set stream_options to include usage if not Mistral and not already set
+    if (
+        getattr(client, "_llm_provider", None) != "mistralai"
+        and "stream_options" not in kwargs
+    ):
+        kwargs["stream_options"] = {"include_usage": True}
+
     stream = await client.chat.completions.create(
         model=model,
         messages=msg_params,
@@ -508,28 +568,51 @@ async def async_stream_completion(
         **kwargs,
     )
 
-    duration = time.time() - start_time
-    logger.debug(
-        f"LLM stream started in {duration:.4f} s, model={model} temperature={temperature}"
-    )
-
     content_chunks: list[str] = []
-    finish_reason = "stop"
+    finish_reason: FinishReason = "stop"
+    usage = None
 
     async for chunk in stream:
-        if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
-            piece = chunk.choices[0].delta.content
+        # Normalize shape:
+        # - OpenAI/Ollama: chunk has .choices/.usage
+        # - Mistral: event.data has .choices/.usage
+        data = getattr(chunk, "data", chunk)
+
+        chunk_usage = getattr(data, "usage", None)
+        if chunk_usage is not None:
+            usage = chunk_usage
+
+        choices = getattr(data, "choices", None)
+        if not choices:
+            # OpenAI stream_options include_usage emits a final usage-only chunk with choices=[]
+            continue
+
+        choice0 = choices[0]
+        piece = choice0.delta.content
+        if piece:
             content_chunks.append(piece)
             yield piece
-        if chunk.choices and chunk.choices[0].finish_reason:
-            finish_reason = chunk.choices[0].finish_reason
+
+        if choice0.finish_reason:
+            finish_reason = cast(FinishReason, choice0.finish_reason)
 
     full_content = "".join(content_chunks)
+    duration = time.time() - start_time
+    _log_chat_response(model=model, duration_s=duration, stream=True, usage=usage)
     yield ChatCompletion(
         id=f"chatcmpl-{model}-{datetime.now().timestamp()}",
         object="chat.completion",
         created=int(datetime.now().timestamp()),
         model=model,
+        usage=(
+            CompletionUsage(
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+            )
+            if usage
+            else None
+        ),
         choices=[
             Choice(
                 index=0,
@@ -774,8 +857,8 @@ def _process_structured_response(
     duration = time.time() - start_time
     _log_chat_response(
         model=model,
-        content_len=len(str(result)),
         duration_s=duration,
+        stream=False,
         usage=response.usage,
     )
     return result
@@ -791,31 +874,31 @@ def _process_text_response(
     duration = time.time() - start_time
     _log_chat_response(
         model=model,
-        content_len=len(content),
         duration_s=duration,
+        stream=False,
         usage=response.usage,
     )
     return content
 
 
 def _log_chat_request(
-    *, model: str, temperature: float, messages: list[dict[str, Any]]
+    *, model: str, temperature: float, messages: list[dict[str, Any]], stream: bool
 ) -> None:
     """Log chat request details."""
     logger.debug(
-        f"LLM request: model={model} temperature={temperature} messages={len(messages)}"
+        f"LLM request: model={model}, temperature={temperature}, stream={stream}, messages={len(messages)}"
     )
 
 
 def _log_chat_response(
-    *, model: str, content_len: int, duration_s: float, usage=None
+    *, model: str, duration_s: float, stream: bool, usage=None
 ) -> None:
     """Log chat response details."""
     usage_str = ""
     if usage:
-        usage_str = f" tokens={{prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}}}"
+        usage_str = f", tokens={{prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}}}"
     logger.debug(
-        f"LLM response: model={model} content_len={content_len} duration_s={duration_s:.4f}{usage_str}"
+        f"LLM response in {duration_s:.2f}s, model={model}, stream={stream}{usage_str}"
     )
 
 
