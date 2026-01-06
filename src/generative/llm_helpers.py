@@ -14,6 +14,10 @@ Streaming Functions:
     stream_completion(): Streams text chunks, yields final ChatCompletion
     async_stream_completion(): Async version of stream_completion()
 
+Model Listing:
+    list_models(): List available models
+    async_list_models(): Async version of list_models()
+
 Mock Functions:
     mock_chat_completion(): Mock chat response for testing
     mock_stream_completion(): Mock streaming response for testing
@@ -111,7 +115,7 @@ def create_mistral_client(
     api_key: Optional[str] = None,
     server_url: str = "https://api.mistral.ai",
     async_client: bool = False,
-    **kwargs,
+    **kwargs: Any,
 ) -> OpenAI | AsyncOpenAI:
     """Creates an OpenAI-compatible client for MistralAI.
 
@@ -128,7 +132,7 @@ def create_mistral_client(
         >>> client = create_mistral_client(api_key="your-key")
         >>> async_client = create_mistral_client(api_key="your-key", async_client=True)
     """
-    from mistralai import Mistral
+    from mistralai import Mistral  # Optional dependency, only required for Mistral API
 
     resolved_api_key = api_key or os.environ.get("MISTRAL_API_KEY")
     if not resolved_api_key:
@@ -178,7 +182,7 @@ def completion(
     system_prompt: Optional[str] = None,
     temperature: float = 0.7,
     response_model: Optional[type[T]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> str | T:
     """Simple prompt completion.
 
@@ -206,8 +210,8 @@ def completion(
     _log_chat_request(model=model, temperature=temperature, messages=messages)
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
-
     start_time = time.time()
+
     if response_model:
         response = client.chat.completions.create(
             model=model,
@@ -216,12 +220,7 @@ def completion(
             response_format=_build_response_format(response_model),
             **kwargs,
         )
-        result = response_model.model_validate_json(response.choices[0].message.content)
-        duration = time.time() - start_time
-        _log_chat_response(
-            model=model, content_len=len(str(result)), duration_s=duration
-        )
-        return result
+        return _process_structured_response(response, response_model, model, start_time)
     else:
         response = client.chat.completions.create(
             model=model,
@@ -229,10 +228,7 @@ def completion(
             temperature=temperature,
             **kwargs,
         )
-        content = response.choices[0].message.content or ""
-        duration = time.time() - start_time
-        _log_chat_response(model=model, content_len=len(content), duration_s=duration)
-        return content
+        return _process_text_response(response, model, start_time)
 
 
 async def async_completion(
@@ -242,7 +238,7 @@ async def async_completion(
     system_prompt: Optional[str] = None,
     temperature: float = 0.7,
     response_model: Optional[type[T]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> str | T:
     """Async version of completion.
 
@@ -266,8 +262,8 @@ async def async_completion(
     _log_chat_request(model=model, temperature=temperature, messages=messages)
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
-
     start_time = time.time()
+
     if response_model:
         response = await client.chat.completions.create(
             model=model,
@@ -276,12 +272,7 @@ async def async_completion(
             response_format=_build_response_format(response_model),
             **kwargs,
         )
-        result = response_model.model_validate_json(response.choices[0].message.content)
-        duration = time.time() - start_time
-        _log_chat_response(
-            model=model, content_len=len(str(result)), duration_s=duration
-        )
-        return result
+        return _process_structured_response(response, response_model, model, start_time)
     else:
         response = await client.chat.completions.create(
             model=model,
@@ -289,10 +280,7 @@ async def async_completion(
             temperature=temperature,
             **kwargs,
         )
-        content = response.choices[0].message.content or ""
-        duration = time.time() - start_time
-        _log_chat_response(model=model, content_len=len(content), duration_s=duration)
-        return content
+        return _process_text_response(response, model, start_time)
 
 
 def chat_completion(
@@ -301,7 +289,7 @@ def chat_completion(
     messages: list[dict[str, Any]],
     temperature: float = 0.7,
     response_model: Optional[type[T]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> str | T:
     """Chat completion with message history.
 
@@ -323,8 +311,8 @@ def chat_completion(
     _log_chat_request(model=model, temperature=temperature, messages=messages)
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
-
     start_time = time.time()
+
     if response_model:
         response = client.chat.completions.create(
             model=model,
@@ -333,12 +321,7 @@ def chat_completion(
             response_format=_build_response_format(response_model),
             **kwargs,
         )
-        result = response_model.model_validate_json(response.choices[0].message.content)
-        duration = time.time() - start_time
-        _log_chat_response(
-            model=model, content_len=len(str(result)), duration_s=duration
-        )
-        return result
+        return _process_structured_response(response, response_model, model, start_time)
     else:
         response = client.chat.completions.create(
             model=model,
@@ -346,10 +329,7 @@ def chat_completion(
             temperature=temperature,
             **kwargs,
         )
-        content = response.choices[0].message.content or ""
-        duration = time.time() - start_time
-        _log_chat_response(model=model, content_len=len(content), duration_s=duration)
-        return content
+        return _process_text_response(response, model, start_time)
 
 
 async def async_chat_completion(
@@ -358,7 +338,7 @@ async def async_chat_completion(
     messages: list[dict[str, Any]],
     temperature: float = 0.7,
     response_model: Optional[type[T]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> str | T:
     """Async version of chat_completion.
 
@@ -376,8 +356,8 @@ async def async_chat_completion(
     _log_chat_request(model=model, temperature=temperature, messages=messages)
 
     msg_params = cast(list[ChatCompletionMessageParam], messages)
-
     start_time = time.time()
+
     if response_model:
         response = await client.chat.completions.create(
             model=model,
@@ -386,12 +366,7 @@ async def async_chat_completion(
             response_format=_build_response_format(response_model),
             **kwargs,
         )
-        result = response_model.model_validate_json(response.choices[0].message.content)
-        duration = time.time() - start_time
-        _log_chat_response(
-            model=model, content_len=len(str(result)), duration_s=duration
-        )
-        return result
+        return _process_structured_response(response, response_model, model, start_time)
     else:
         response = await client.chat.completions.create(
             model=model,
@@ -399,10 +374,7 @@ async def async_chat_completion(
             temperature=temperature,
             **kwargs,
         )
-        content = response.choices[0].message.content or ""
-        duration = time.time() - start_time
-        _log_chat_response(model=model, content_len=len(content), duration_s=duration)
-        return content
+        return _process_text_response(response, model, start_time)
 
 
 def stream_completion(
@@ -410,7 +382,7 @@ def stream_completion(
     model: str,
     messages: list[dict[str, Any]],
     temperature: float = 0.7,
-    **kwargs,
+    **kwargs: Any,
 ) -> Iterator[str | ChatCompletion]:
     """Stream text chunks from completion, then yield final ChatCompletion.
 
@@ -442,10 +414,7 @@ def stream_completion(
 
     duration = time.time() - start_time
     logger.debug(
-        "LLM stream started in %.4f s, model=%s temperature=%s",
-        duration,
-        model,
-        temperature,
+        f"LLM stream started in {duration:.4f} s, model={model} temperature={temperature}"
     )
 
     content_chunks: list[str] = []
@@ -480,7 +449,7 @@ async def async_stream_completion(
     model: str,
     messages: list[dict[str, Any]],
     temperature: float = 0.7,
-    **kwargs,
+    **kwargs: Any,
 ) -> AsyncIterator[str | ChatCompletion]:
     """Async version of stream_completion.
 
@@ -512,10 +481,7 @@ async def async_stream_completion(
 
     duration = time.time() - start_time
     logger.debug(
-        "LLM stream started in %.4f s, model=%s temperature=%s",
-        duration,
-        model,
-        temperature,
+        f"LLM stream started in {duration:.4f} s, model={model} temperature={temperature}"
     )
 
     content_chunks: list[str] = []
@@ -545,7 +511,133 @@ async def async_stream_completion(
     )
 
 
-async def mock_chat_completion(
+def list_models(
+    client: OpenAI,
+    base_url: str = "http://localhost:11434",
+    include_capabilities: bool = False,
+) -> list[str] | list[dict[str, Any]]:
+    """List available models.
+
+    Args:
+        client: OpenAI client
+        base_url: Base URL for capability detection (Ollama only)
+        include_capabilities: If True, fetch Ollama-specific capabilities
+
+    Returns:
+        list[str] of model names, or list[dict] with capabilities if include_capabilities=True
+
+    Raises:
+        NotImplementedError: If include_capabilities=True for non-Ollama providers
+
+    Example:
+        >>> models = list_models(client)
+        ['llama3.2:1b', 'mistral:latest']
+        >>> models = list_models(client, include_capabilities=True)
+        [{'name': 'llama3.2:1b', 'capabilities': ['completion']}, ...]
+    """
+    import httpx  # Optional dependency, only required for capability detection
+
+    models = client.models.list()
+    model_names = [model.id for model in models.data]
+
+    if not include_capabilities:
+        return model_names
+
+    # Ollama capability detection
+    import concurrent.futures  # Stdlib, for parallel HTTP requests
+
+    ollama_api_url = f"{base_url.rstrip('/')}/api/show"
+
+    def fetch_model_capabilities(model_name: str) -> dict[str, Any]:
+        with httpx.Client(timeout=10.0) as http_client:
+            try:
+                response = http_client.post(
+                    ollama_api_url,
+                    json={"name": model_name},
+                )
+                response.raise_for_status()
+                model_info = response.json()
+                capabilities = model_info.get("capabilities", [])
+                return {"name": model_name, "capabilities": capabilities}
+            except (httpx.HTTPError, httpx.ConnectError) as e:
+                # Not Ollama or capability detection not supported
+                raise NotImplementedError(
+                    f"Capability detection not supported for this provider: {e}"
+                ) from e
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        models_info = list(executor.map(fetch_model_capabilities, model_names))
+
+    return models_info
+
+
+async def async_list_models(
+    client: AsyncOpenAI,
+    base_url: str = "http://localhost:11434",
+    include_capabilities: bool = False,
+) -> list[str] | list[dict[str, Any]]:
+    """Async version of list_models.
+
+    Args:
+        client: AsyncOpenAI client
+        base_url: Base URL for capability detection (Ollama only)
+        include_capabilities: If True, fetch Ollama-specific capabilities
+
+    Returns:
+        list[str] of model names, or list[dict] with capabilities if include_capabilities=True
+
+    Raises:
+        NotImplementedError: If include_capabilities=True for non-Ollama providers
+
+    Example:
+        >>> models = await async_list_models(client)
+        ['llama3.2:1b', 'mistral:latest']
+        >>> models = await async_list_models(client, include_capabilities=True)
+        [{'name': 'llama3.2:1b', 'capabilities': ['completion']}, ...]
+    """
+    import httpx  # Optional dependency, only required for capability detection
+
+    models = await client.models.list()
+    model_names = [model.id for model in models.data]
+
+    if not include_capabilities:
+        return model_names
+
+    # Ollama capability detection
+    import asyncio  # Stdlib, for parallel async requests
+
+    ollama_api_url = f"{base_url.rstrip('/')}/api/show"
+
+    async def fetch_model_capabilities(
+        model_name: str, http_client: httpx.AsyncClient
+    ) -> dict[str, Any]:
+        try:
+            response = await http_client.post(
+                ollama_api_url,
+                json={"name": model_name},
+            )
+            response.raise_for_status()
+            model_info = response.json()
+            capabilities = model_info.get("capabilities", [])
+            return {"name": model_name, "capabilities": capabilities}
+        except (httpx.HTTPError, httpx.ConnectError) as e:
+            # Not Ollama or capability detection not supported
+            raise NotImplementedError(
+                f"Capability detection not supported for this provider: {e}"
+            ) from e
+
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        models_info = await asyncio.gather(
+            *[
+                fetch_model_capabilities(model_name, http_client)
+                for model_name in model_names
+            ]
+        )
+
+    return list(models_info)
+
+
+def mock_chat_completion(
     *,
     messages: list[dict[str, Any]],
     model: str = "mock-llm",
@@ -577,7 +669,6 @@ async def mock_chat_completion(
         user_message,
         "This is a mock response.",
         f"This is a mock response from {model} with temperature {temperature}.",
-        f"Let me think about '{user_message}'...",
     ]
 
     if response_type is None:
@@ -643,25 +734,59 @@ def _build_response_format(response_model: type[BaseModel]) -> ResponseFormatJSO
     )
 
 
+def _process_structured_response(
+    response: ChatCompletion,
+    response_model: type[T],
+    model: str,
+    start_time: float,
+) -> T:
+    """Process a structured response with a Pydantic model."""
+    result = response_model.model_validate_json(response.choices[0].message.content)  # type: ignore
+    duration = time.time() - start_time
+    _log_chat_response(
+        model=model,
+        content_len=len(str(result)),
+        duration_s=duration,
+        usage=response.usage,
+    )
+    return result
+
+
+def _process_text_response(
+    response: ChatCompletion,
+    model: str,
+    start_time: float,
+) -> str:
+    """Process a text response."""
+    content = response.choices[0].message.content or ""
+    duration = time.time() - start_time
+    _log_chat_response(
+        model=model,
+        content_len=len(content),
+        duration_s=duration,
+        usage=response.usage,
+    )
+    return content
+
+
 def _log_chat_request(
     *, model: str, temperature: float, messages: list[dict[str, Any]]
 ) -> None:
     """Log chat request details."""
     logger.debug(
-        "LLM request: model=%s temperature=%s messages=%s",
-        model,
-        temperature,
-        len(messages),
+        f"LLM request: model={model} temperature={temperature} messages={len(messages)}"
     )
 
 
-def _log_chat_response(*, model: str, content_len: int, duration_s: float) -> None:
+def _log_chat_response(
+    *, model: str, content_len: int, duration_s: float, usage=None
+) -> None:
     """Log chat response details."""
+    usage_str = ""
+    if usage:
+        usage_str = f" tokens={{prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}}}"
     logger.debug(
-        "LLM response: model=%s content_len=%s duration_s=%.4f",
-        model,
-        content_len,
-        duration_s,
+        f"LLM response: model={model} content_len={content_len} duration_s={duration_s:.4f}{usage_str}"
     )
 
 
