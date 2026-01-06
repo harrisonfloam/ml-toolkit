@@ -213,12 +213,39 @@ def create_mistral_client(
         return cast(OpenAI, mistral_client)
 
 
+@overload
 def completion(
     client: OpenAI,
     model: str,
     prompt: str,
     system_prompt: Optional[str] = None,
     temperature: float = 0.7,
+    *,
+    response_model: None = None,
+    **kwargs: Any,
+) -> str: ...
+
+
+@overload
+def completion(
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    temperature: float = 0.7,
+    *,
+    response_model: type[T],
+    **kwargs: Any,
+) -> T: ...
+
+
+def completion(
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    temperature: float = 0.7,
+    *,
     response_model: Optional[type[T]] = None,
     **kwargs: Any,
 ) -> str | T:
@@ -271,12 +298,39 @@ def completion(
         return _process_text_response(response, model, start_time)
 
 
+@overload
 async def async_completion(
     client: AsyncOpenAI,
     model: str,
     prompt: str,
     system_prompt: Optional[str] = None,
     temperature: float = 0.7,
+    *,
+    response_model: None = None,
+    **kwargs: Any,
+) -> str: ...
+
+
+@overload
+async def async_completion(
+    client: AsyncOpenAI,
+    model: str,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    temperature: float = 0.7,
+    *,
+    response_model: type[T],
+    **kwargs: Any,
+) -> T: ...
+
+
+async def async_completion(
+    client: AsyncOpenAI,
+    model: str,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    temperature: float = 0.7,
+    *,
     response_model: Optional[type[T]] = None,
     **kwargs: Any,
 ) -> str | T:
@@ -325,11 +379,36 @@ async def async_completion(
         return _process_text_response(response, model, start_time)
 
 
+@overload
 def chat_completion(
     client: OpenAI,
     model: str,
     messages: list[dict[str, Any]],
     temperature: float = 0.7,
+    *,
+    response_model: None = None,
+    **kwargs: Any,
+) -> str: ...
+
+
+@overload
+def chat_completion(
+    client: OpenAI,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.7,
+    *,
+    response_model: type[T],
+    **kwargs: Any,
+) -> T: ...
+
+
+def chat_completion(
+    client: OpenAI,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.7,
+    *,
     response_model: Optional[type[T]] = None,
     **kwargs: Any,
 ) -> str | T:
@@ -376,11 +455,36 @@ def chat_completion(
         return _process_text_response(response, model, start_time)
 
 
+@overload
 async def async_chat_completion(
     client: AsyncOpenAI,
     model: str,
     messages: list[dict[str, Any]],
     temperature: float = 0.7,
+    *,
+    response_model: None = None,
+    **kwargs: Any,
+) -> str: ...
+
+
+@overload
+async def async_chat_completion(
+    client: AsyncOpenAI,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.7,
+    *,
+    response_model: type[T],
+    **kwargs: Any,
+) -> T: ...
+
+
+async def async_chat_completion(
+    client: AsyncOpenAI,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.7,
+    *,
     response_model: Optional[type[T]] = None,
     **kwargs: Any,
 ) -> str | T:
