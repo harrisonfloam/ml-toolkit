@@ -623,67 +623,7 @@ async def async_stream_completion(
     )
 
 
-def list_models(
-    client: OpenAI,
-    base_url: str = "http://localhost:11434",
-    include_capabilities: bool = False,
-) -> list[str] | list[dict[str, Any]]:
-    """List available models.
-
-    Args:
-        client: OpenAI client
-        base_url: Base URL for capability detection (Ollama only)
-        include_capabilities: If True, fetch Ollama-specific capabilities
-
-    Returns:
-        list[str] of model names, or list[dict] with capabilities if include_capabilities=True
-
-    Raises:
-        NotImplementedError: If include_capabilities=True for non-Ollama providers
-
-    Example:
-        >>> models = list_models(client)
-        ['llama3.2:1b', 'mistral:latest']
-        >>> models = list_models(client, include_capabilities=True)
-        [{'name': 'llama3.2:1b', 'capabilities': ['completion']}, ...]
-    """
-    import httpx  # Optional dependency, only required for capability detection
-
-    models = client.models.list()
-    model_names = [model.id for model in models.data]
-
-    if not include_capabilities:
-        return model_names
-
-    # Ollama capability detection
-    import concurrent.futures  # Stdlib, for parallel HTTP requests
-
-    ollama_api_url = f"{base_url.rstrip('/')}/api/show"
-
-    def fetch_model_capabilities(model_name: str) -> dict[str, Any]:
-        with httpx.Client(timeout=10.0) as http_client:
-            try:
-                response = http_client.post(
-                    ollama_api_url,
-                    json={"name": model_name},
-                )
-                response.raise_for_status()
-                model_info = response.json()
-                capabilities = model_info.get("capabilities", [])
-                return {"name": model_name, "capabilities": capabilities}
-            except (httpx.HTTPError, httpx.ConnectError) as e:
-                # Not Ollama or capability detection not supported
-                raise NotImplementedError(
-                    f"Capability detection not supported for this provider: {e}"
-                ) from e
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        models_info = list(executor.map(fetch_model_capabilities, model_names))
-
-    return models_info
-
-
-async def async_list_models(
+async def list_models(
     client: AsyncOpenAI,
     base_url: str = "http://localhost:11434",
     include_capabilities: bool = False,
@@ -702,17 +642,22 @@ async def async_list_models(
         NotImplementedError: If include_capabilities=True for non-Ollama providers
 
     Example:
-        >>> models = await async_list_models(client)
+        >>> models = await list_models(client)
         ['llama3.2:1b', 'mistral:latest']
-        >>> models = await async_list_models(client, include_capabilities=True)
+        >>> models = await list_models(client, include_capabilities=True)
         [{'name': 'llama3.2:1b', 'capabilities': ['completion']}, ...]
     """
     import httpx  # Optional dependency, only required for capability detection
 
+    start_time = time.time()
     models = await client.models.list()
     model_names = [model.id for model in models.data]
 
     if not include_capabilities:
+        duration = time.time() - start_time
+        logger.debug(
+            f"Model list retrieved in {duration:.1f}s, count={len(model_names)}"
+        )
         return model_names
 
     # Ollama capability detection
@@ -746,6 +691,8 @@ async def async_list_models(
             ]
         )
 
+    duration = time.time() - start_time
+    logger.debug(f"Model list retrieved in {duration:.1f}s, count={len(model_names)}")
     return list(models_info)
 
 
