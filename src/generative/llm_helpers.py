@@ -111,9 +111,30 @@ def create_ollama_client(
         )
 
 
+@overload
 def create_mistral_client(
     api_key: Optional[str] = None,
     server_url: str = "https://api.mistral.ai",
+    *,
+    async_client: Literal[False] = False,
+    **kwargs: Any,
+) -> OpenAI: ...
+
+
+@overload
+def create_mistral_client(
+    api_key: Optional[str] = None,
+    server_url: str = "https://api.mistral.ai",
+    *,
+    async_client: Literal[True],
+    **kwargs: Any,
+) -> AsyncOpenAI: ...
+
+
+def create_mistral_client(
+    api_key: Optional[str] = None,
+    server_url: str = "https://api.mistral.ai",
+    *,
     async_client: bool = False,
     **kwargs: Any,
 ) -> OpenAI | AsyncOpenAI:
