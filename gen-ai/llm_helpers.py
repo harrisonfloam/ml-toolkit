@@ -24,6 +24,7 @@ Mock Functions:
 """
 
 import logging
+import math
 import os
 import random
 import time
@@ -39,6 +40,7 @@ from typing import (
     overload,
 )
 
+import httpx
 from openai import AsyncOpenAI, OpenAI
 from openai.types.chat import (
     ChatCompletion,
@@ -51,9 +53,11 @@ from openai.types.shared_params.response_format_json_schema import (
     JSONSchema,
     ResponseFormatJSONSchema,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
+
+_ERROR_SNIPPET_MAX_LEN = 400
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -190,6 +194,32 @@ def create_mistral_client(
             # Handle streaming
             stream = kwargs.pop("stream", False)
 
+            # OpenAI-style per-call timeout (seconds) -> Mistral timeout_ms (ms).
+            # Streaming intentionally ignores per-call timeout.
+            timeout = kwargs.pop("timeout", None)
+            model = kwargs.get("model")
+            timeout_ms_existing = kwargs.get("timeout_ms")
+
+            if timeout is not None and timeout_ms_existing is not None:
+                logger.warning(
+                    f"LLM timeout ignored for mistralai; both timeout and timeout_ms were provided, using timeout_ms. model={model!r}"
+                )
+            elif stream and timeout is not None:
+                logger.warning(
+                    f"LLM timeout ignored for mistralai; timeout not supported for streaming. model={model!r}"
+                )
+            elif timeout is not None:
+                if not isinstance(timeout, (int, float)):
+                    logger.warning(
+                        f"LLM timeout ignored for mistralai; timeout must be numeric seconds. timeout={timeout!r}, model={model!r}"
+                    )
+                elif timeout <= 0:
+                    logger.warning(
+                        f"LLM timeout ignored for mistralai; timeout must be > 0 seconds. timeout={timeout!r}, model={model!r}"
+                    )
+                elif timeout_ms_existing is None:
+                    kwargs["timeout_ms"] = int(math.ceil(timeout * 1000))
+
             if stream:
                 return (
                     self._mistral.chat.stream_async(**kwargs)
@@ -222,6 +252,7 @@ def completion(
     temperature: float = 0.7,
     *,
     response_model: None = None,
+    retries: int = 2,
     **kwargs: Any,
 ) -> str: ...
 
@@ -235,6 +266,7 @@ def completion(
     temperature: float = 0.7,
     *,
     response_model: type[T],
+    retries: int = 2,
     **kwargs: Any,
 ) -> T: ...
 
@@ -247,6 +279,7 @@ def completion(
     temperature: float = 0.7,
     *,
     response_model: Optional[type[T]] = None,
+    retries: int = 2,
     **kwargs: Any,
 ) -> str | T:
     """Simple prompt completion.
@@ -258,6 +291,7 @@ def completion(
         system_prompt: Optional system message
         temperature: Sampling temperature
         response_model: Optional Pydantic model for structured output
+        retries: Retries on truncation and structured-parse failures (no timeout retries)
         **kwargs: Additional arguments for chat.completions.create
 
     Returns:
@@ -272,30 +306,15 @@ def completion(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    _log_chat_request(
-        model=model, temperature=temperature, messages=messages, stream=False
+    return chat_completion(
+        client,
+        model,
+        messages,
+        temperature,
+        response_model=response_model,
+        retries=retries,
+        **kwargs,
     )
-
-    msg_params = cast(list[ChatCompletionMessageParam], messages)
-    start_time = time.time()
-
-    if response_model:
-        response = client.chat.completions.create(
-            model=model,
-            messages=msg_params,
-            temperature=temperature,
-            response_format=_build_response_format(response_model),
-            **kwargs,
-        )
-        return _process_structured_response(response, response_model, model, start_time)
-    else:
-        response = client.chat.completions.create(
-            model=model,
-            messages=msg_params,
-            temperature=temperature,
-            **kwargs,
-        )
-        return _process_text_response(response, model, start_time)
 
 
 @overload
@@ -307,6 +326,7 @@ async def async_completion(
     temperature: float = 0.7,
     *,
     response_model: None = None,
+    retries: int = 2,
     **kwargs: Any,
 ) -> str: ...
 
@@ -320,6 +340,7 @@ async def async_completion(
     temperature: float = 0.7,
     *,
     response_model: type[T],
+    retries: int = 2,
     **kwargs: Any,
 ) -> T: ...
 
@@ -332,6 +353,7 @@ async def async_completion(
     temperature: float = 0.7,
     *,
     response_model: Optional[type[T]] = None,
+    retries: int = 2,
     **kwargs: Any,
 ) -> str | T:
     """Async version of completion.
@@ -343,6 +365,7 @@ async def async_completion(
         system_prompt: Optional system message
         temperature: Sampling temperature
         response_model: Optional Pydantic model for structured output
+        retries: Retries on truncation and structured-parse failures (no timeout retries)
         **kwargs: Additional arguments for chat.completions.create
 
     Returns:
@@ -353,30 +376,15 @@ async def async_completion(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    _log_chat_request(
-        model=model, temperature=temperature, messages=messages, stream=False
+    return await async_chat_completion(
+        client,
+        model,
+        messages,
+        temperature,
+        response_model=response_model,
+        retries=retries,
+        **kwargs,
     )
-
-    msg_params = cast(list[ChatCompletionMessageParam], messages)
-    start_time = time.time()
-
-    if response_model:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=msg_params,
-            temperature=temperature,
-            response_format=_build_response_format(response_model),
-            **kwargs,
-        )
-        return _process_structured_response(response, response_model, model, start_time)
-    else:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=msg_params,
-            temperature=temperature,
-            **kwargs,
-        )
-        return _process_text_response(response, model, start_time)
 
 
 @overload
@@ -387,6 +395,7 @@ def chat_completion(
     temperature: float = 0.7,
     *,
     response_model: None = None,
+    retries: int = 2,
     **kwargs: Any,
 ) -> str: ...
 
@@ -399,6 +408,7 @@ def chat_completion(
     temperature: float = 0.7,
     *,
     response_model: type[T],
+    retries: int = 2,
     **kwargs: Any,
 ) -> T: ...
 
@@ -410,9 +420,16 @@ def chat_completion(
     temperature: float = 0.7,
     *,
     response_model: Optional[type[T]] = None,
+    retries: int = 2,
     **kwargs: Any,
 ) -> str | T:
     """Chat completion with message history.
+
+    Retries up to `retries` times when:
+    - the model truncates output (`finish_reason == "length"`), or TODO: should we auto retry here? that should be opt in...
+    - structured output validation fails (when `response_model` is provided).
+
+    Timeouts are never retried.
 
     Args:
         client: OpenAI client
@@ -420,6 +437,7 @@ def chat_completion(
         messages: List of message dicts with 'role' and 'content'
         temperature: Sampling temperature
         response_model: Optional Pydantic model for structured output
+        retries: Number of retry attempts (default 2)
         **kwargs: Additional arguments for chat.completions.create
 
     Returns:
@@ -429,30 +447,85 @@ def chat_completion(
         >>> messages = [{"role": "user", "content": "Hello"}]
         >>> response = chat_completion(client, "llama3.2:1b", messages)
     """
-    _log_chat_request(
-        model=model, temperature=temperature, messages=messages, stream=False
-    )
+    retries = max(0, retries)
+    current_messages = messages
 
-    msg_params = cast(list[ChatCompletionMessageParam], messages)
+    _log_chat_request(
+        model=model, temperature=temperature, messages=current_messages, stream=False
+    )
     start_time = time.time()
 
-    if response_model:
-        response = client.chat.completions.create(
+    for attempt in range(retries + 1):
+        msg_params = cast(list[ChatCompletionMessageParam], current_messages)
+        try:
+            if response_model:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=msg_params,
+                    temperature=temperature,
+                    response_format=_build_response_format(response_model),
+                    **kwargs,
+                )
+            else:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=msg_params,
+                    temperature=temperature,
+                    **kwargs,
+                )
+        except BaseException:
+            raise
+
+        if not getattr(response, "choices", None):
+            raise ValueError("LLM returned no choices")
+
+        if response.choices[0].finish_reason == "length" and attempt < retries:
+            current_messages = [
+                *current_messages,
+                {"role": "system", "content": "Be more concise."},
+            ]
+            continue
+
+        if response_model:
+            content = response.choices[0].message.content or ""
+            try:
+                result = response_model.model_validate_json(content)  # type: ignore
+            except ValidationError as e:
+                if attempt < retries:
+                    snippet = _truncate_error_snippet(
+                        str(e), max_len=_ERROR_SNIPPET_MAX_LEN
+                    )
+                    current_messages = [
+                        *current_messages,
+                        {
+                            "role": "system",
+                            "content": "Return ONLY valid JSON that matches the requested schema. "
+                            f"Previous error: {snippet}",
+                        },
+                    ]
+                    continue
+                raise
+
+            duration = time.time() - start_time
+            _log_chat_response(
+                model=model,
+                duration_s=duration,
+                stream=False,
+                usage=response.usage,
+            )
+            return result
+
+        content = response.choices[0].message.content or ""
+        duration = time.time() - start_time
+        _log_chat_response(
             model=model,
-            messages=msg_params,
-            temperature=temperature,
-            response_format=_build_response_format(response_model),
-            **kwargs,
+            duration_s=duration,
+            stream=False,
+            usage=response.usage,
         )
-        return _process_structured_response(response, response_model, model, start_time)
-    else:
-        response = client.chat.completions.create(
-            model=model,
-            messages=msg_params,
-            temperature=temperature,
-            **kwargs,
-        )
-        return _process_text_response(response, model, start_time)
+        return content
+
+    raise RuntimeError("Unreachable")
 
 
 @overload
@@ -463,6 +536,7 @@ async def async_chat_completion(
     temperature: float = 0.7,
     *,
     response_model: None = None,
+    retries: int = 2,
     **kwargs: Any,
 ) -> str: ...
 
@@ -475,6 +549,7 @@ async def async_chat_completion(
     temperature: float = 0.7,
     *,
     response_model: type[T],
+    retries: int = 2,
     **kwargs: Any,
 ) -> T: ...
 
@@ -486,9 +561,16 @@ async def async_chat_completion(
     temperature: float = 0.7,
     *,
     response_model: Optional[type[T]] = None,
+    retries: int = 2,
     **kwargs: Any,
 ) -> str | T:
     """Async version of chat_completion.
+
+    Retries up to `retries` times when:
+    - the model truncates output (`finish_reason == "length"`), or
+    - structured output validation fails (when `response_model` is provided).
+
+    Timeouts are never retried.
 
     Args:
         client: AsyncOpenAI client
@@ -496,35 +578,91 @@ async def async_chat_completion(
         messages: List of message dicts with 'role' and 'content'
         temperature: Sampling temperature
         response_model: Optional Pydantic model for structured output
+        retries: Number of retry attempts (default 2)
         **kwargs: Additional arguments for chat.completions.create
 
     Returns:
         str if no response_model, otherwise instance of response_model
     """
-    _log_chat_request(
-        model=model, temperature=temperature, messages=messages, stream=False
-    )
+    retries = max(0, retries)
+    current_messages = messages
 
-    msg_params = cast(list[ChatCompletionMessageParam], messages)
+    _log_chat_request(
+        model=model, temperature=temperature, messages=current_messages, stream=False
+    )
     start_time = time.time()
 
-    if response_model:
-        response = await client.chat.completions.create(
+    for attempt in range(retries + 1):
+        msg_params = cast(list[ChatCompletionMessageParam], current_messages)
+        try:
+            if response_model:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=msg_params,
+                    temperature=temperature,
+                    response_format=_build_response_format(response_model),
+                    **kwargs,
+                )
+            else:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=msg_params,
+                    temperature=temperature,
+                    **kwargs,
+                )
+        except BaseException:
+            raise
+
+        if not getattr(response, "choices", None):
+            raise ValueError("LLM returned no choices")
+
+        if response.choices[0].finish_reason == "length" and attempt < retries:
+            current_messages = [
+                *current_messages,
+                {"role": "system", "content": "Be more concise."},
+            ]
+            continue
+
+        if response_model:
+            content = response.choices[0].message.content or ""
+            try:
+                result = response_model.model_validate_json(content)  # type: ignore
+            except ValidationError as e:
+                if attempt < retries:
+                    snippet = _truncate_error_snippet(
+                        str(e), max_len=_ERROR_SNIPPET_MAX_LEN
+                    )
+                    current_messages = [
+                        *current_messages,
+                        {
+                            "role": "system",
+                            "content": "Return ONLY valid JSON that matches the requested schema. "
+                            f"Previous error: {snippet}",
+                        },
+                    ]
+                    continue
+                raise
+
+            duration = time.time() - start_time
+            _log_chat_response(
+                model=model,
+                duration_s=duration,
+                stream=False,
+                usage=response.usage,
+            )
+            return result
+
+        content = response.choices[0].message.content or ""
+        duration = time.time() - start_time
+        _log_chat_response(
             model=model,
-            messages=msg_params,
-            temperature=temperature,
-            response_format=_build_response_format(response_model),
-            **kwargs,
+            duration_s=duration,
+            stream=False,
+            usage=response.usage,
         )
-        return _process_structured_response(response, response_model, model, start_time)
-    else:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=msg_params,
-            temperature=temperature,
-            **kwargs,
-        )
-        return _process_text_response(response, model, start_time)
+        return content
+
+    raise RuntimeError("Unreachable")
 
 
 def stream_completion(
@@ -751,8 +889,6 @@ async def list_models(
         >>> models = await list_models(client, include_capabilities=True)
         [{'name': 'llama3.2:1b', 'capabilities': ['completion']}, ...]
     """
-    import httpx  # Optional dependency, only required for capability detection
-
     start_time = time.time()
     models = await client.models.list()
     model_names = [model.id for model in models.data]
@@ -897,41 +1033,6 @@ def _build_response_format(response_model: type[BaseModel]) -> ResponseFormatJSO
     )
 
 
-def _process_structured_response(
-    response: ChatCompletion,
-    response_model: type[T],
-    model: str,
-    start_time: float,
-) -> T:
-    """Process a structured response with a Pydantic model."""
-    result = response_model.model_validate_json(response.choices[0].message.content)  # type: ignore
-    duration = time.time() - start_time
-    _log_chat_response(
-        model=model,
-        duration_s=duration,
-        stream=False,
-        usage=response.usage,
-    )
-    return result
-
-
-def _process_text_response(
-    response: ChatCompletion,
-    model: str,
-    start_time: float,
-) -> str:
-    """Process a text response."""
-    content = response.choices[0].message.content or ""
-    duration = time.time() - start_time
-    _log_chat_response(
-        model=model,
-        duration_s=duration,
-        stream=False,
-        usage=response.usage,
-    )
-    return content
-
-
 def _log_chat_request(
     *, model: str, temperature: float, messages: list[dict[str, Any]], stream: bool
 ) -> None:
@@ -968,3 +1069,11 @@ def _create_mock_response(*, content: str, model: str) -> ChatCompletion:
             )
         ],
     )
+
+
+def _truncate_error_snippet(text: str, *, max_len: int) -> str:
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
