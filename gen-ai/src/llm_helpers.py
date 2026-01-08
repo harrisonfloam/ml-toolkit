@@ -426,7 +426,7 @@ def chat_completion(
     """Chat completion with message history.
 
     Retries up to `retries` times when:
-    - the model truncates output (`finish_reason == "length"`), or TODO: should we auto retry here? that should be opt in...
+    - the model truncates output (`finish_reason == "length"`), or
     - structured output validation fails (when `response_model` is provided).
 
     Timeouts are never retried.
@@ -457,73 +457,33 @@ def chat_completion(
 
     for attempt in range(retries + 1):
         msg_params = cast(list[ChatCompletionMessageParam], current_messages)
-        try:
-            if response_model:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=msg_params,
-                    temperature=temperature,
-                    response_format=_build_response_format(response_model),
-                    **kwargs,
-                )
-            else:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=msg_params,
-                    temperature=temperature,
-                    **kwargs,
-                )
-        except BaseException:
-            raise
-
-        if not getattr(response, "choices", None):
-            raise ValueError("LLM returned no choices")
-
-        if response.choices[0].finish_reason == "length" and attempt < retries:
-            current_messages = [
-                *current_messages,
-                {"role": "system", "content": "Be more concise."},
-            ]
-            continue
-
         if response_model:
-            content = response.choices[0].message.content or ""
-            try:
-                result = response_model.model_validate_json(content)  # type: ignore
-            except ValidationError as e:
-                if attempt < retries:
-                    snippet = _truncate_error_snippet(
-                        str(e), max_len=_ERROR_SNIPPET_MAX_LEN
-                    )
-                    current_messages = [
-                        *current_messages,
-                        {
-                            "role": "system",
-                            "content": "Return ONLY valid JSON that matches the requested schema. "
-                            f"Previous error: {snippet}",
-                        },
-                    ]
-                    continue
-                raise
-
-            duration = time.time() - start_time
-            _log_chat_response(
+            response = client.chat.completions.create(
                 model=model,
-                duration_s=duration,
-                stream=False,
-                usage=response.usage,
+                messages=msg_params,
+                temperature=temperature,
+                response_format=_build_response_format(response_model),
+                **kwargs,
             )
-            return result
+        else:
+            response = client.chat.completions.create(
+                model=model,
+                messages=msg_params,
+                temperature=temperature,
+                **kwargs,
+            )
 
-        content = response.choices[0].message.content or ""
-        duration = time.time() - start_time
-        _log_chat_response(
+        done, value, current_messages = _handle_chat_attempt(
+            response=response,
+            response_model=response_model,
             model=model,
-            duration_s=duration,
-            stream=False,
-            usage=response.usage,
+            start_time=start_time,
+            attempt=attempt,
+            retries=retries,
+            current_messages=current_messages,
         )
-        return content
+        if done:
+            return cast(str | T, value)
 
     raise RuntimeError("Unreachable")
 
@@ -594,65 +554,80 @@ async def async_chat_completion(
 
     for attempt in range(retries + 1):
         msg_params = cast(list[ChatCompletionMessageParam], current_messages)
-        try:
-            if response_model:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=msg_params,
-                    temperature=temperature,
-                    response_format=_build_response_format(response_model),
-                    **kwargs,
-                )
-            else:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=msg_params,
-                    temperature=temperature,
-                    **kwargs,
-                )
-        except BaseException:
-            raise
-
-        if not getattr(response, "choices", None):
-            raise ValueError("LLM returned no choices")
-
-        if response.choices[0].finish_reason == "length" and attempt < retries:
-            current_messages = [
-                *current_messages,
-                {"role": "system", "content": "Be more concise."},
-            ]
-            continue
-
         if response_model:
-            content = response.choices[0].message.content or ""
-            try:
-                result = response_model.model_validate_json(content)  # type: ignore
-            except ValidationError as e:
-                if attempt < retries:
-                    snippet = _truncate_error_snippet(
-                        str(e), max_len=_ERROR_SNIPPET_MAX_LEN
-                    )
-                    current_messages = [
+            response = await client.chat.completions.create(
+                model=model,
+                messages=msg_params,
+                temperature=temperature,
+                response_format=_build_response_format(response_model),
+                **kwargs,
+            )
+        else:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=msg_params,
+                temperature=temperature,
+                **kwargs,
+            )
+
+        done, value, current_messages = _handle_chat_attempt(
+            response=response,
+            response_model=response_model,
+            model=model,
+            start_time=start_time,
+            attempt=attempt,
+            retries=retries,
+            current_messages=current_messages,
+        )
+        if done:
+            return cast(str | T, value)
+
+    raise RuntimeError("Unreachable")
+
+
+def _handle_chat_attempt(
+    *,
+    response: ChatCompletion,
+    response_model: Optional[type[T]],
+    model: str,
+    start_time: float,
+    attempt: int,
+    retries: int,
+    current_messages: list[dict[str, Any]],
+) -> tuple[bool, str | T | None, list[dict[str, Any]]]:
+    if not getattr(response, "choices", None):
+        raise ValueError("LLM returned no choices")
+
+    if response.choices[0].finish_reason == "length" and attempt < retries:
+        return (
+            False,
+            None,
+            [*current_messages, {"role": "system", "content": "Be more concise."}],
+        )
+
+    if response_model is not None:
+        content = response.choices[0].message.content or ""
+        try:
+            result = response_model.model_validate_json(content)  # type: ignore
+        except ValidationError as e:
+            if attempt < retries:
+                snippet = _truncate_error_snippet(
+                    str(e), max_len=_ERROR_SNIPPET_MAX_LEN
+                )
+                return (
+                    False,
+                    None,
+                    [
                         *current_messages,
                         {
                             "role": "system",
                             "content": "Return ONLY valid JSON that matches the requested schema. "
                             f"Previous error: {snippet}",
                         },
-                    ]
-                    continue
-                raise
+                    ],
+                )
+            raise
 
-            duration = time.time() - start_time
-            _log_chat_response(
-                model=model,
-                duration_s=duration,
-                stream=False,
-                usage=response.usage,
-            )
-            return result
-
-        content = response.choices[0].message.content or ""
         duration = time.time() - start_time
         _log_chat_response(
             model=model,
@@ -660,9 +635,17 @@ async def async_chat_completion(
             stream=False,
             usage=response.usage,
         )
-        return content
+        return True, result, current_messages
 
-    raise RuntimeError("Unreachable")
+    content = response.choices[0].message.content or ""
+    duration = time.time() - start_time
+    _log_chat_response(
+        model=model,
+        duration_s=duration,
+        stream=False,
+        usage=response.usage,
+    )
+    return True, content, current_messages
 
 
 def stream_completion(
