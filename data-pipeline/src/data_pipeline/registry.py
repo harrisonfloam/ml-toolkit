@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from pipeline.types import DatasetSpec, PipelineConfig
+from data_pipeline.types import DatasetSpec, PipelineConfig
 
 
 @dataclass(frozen=True)

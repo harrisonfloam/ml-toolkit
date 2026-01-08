@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 import yaml
 
-from pipeline.types import DatasetSpec, PipelineConfig
+from data_pipeline.types import DatasetSpec, PipelineConfig
 
 
 def load_config(path: str | Path) -> PipelineConfig:

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "ml-toolkit"
+version = "0.1.0"
+description = "A collection of reusable AI / ML components and related projects."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "gen-ai",
+  "memory-layer",
+  "data-pipeline",
+  "quiz-generator",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.build-backend]
+module-name = "ml_toolkit"
+module-root = ""
+
+[tool.uv.workspace]
+members = [
+  "gen-ai",
+  "memory-layer",
+  "data-pipeline",
+  "quiz-generator",
+]
+
+[tool.uv.sources]
+"gen-ai" = { workspace = true }
+"memory-layer" = { workspace = true }
+"data-pipeline" = { workspace = true }
+"quiz-generator" = { workspace = true }

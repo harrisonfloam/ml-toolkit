@@ -54,3 +54,6 @@ class Memory:
         # TODO: Sum all pending nodes in routes dict
         # TODO: Return dict with: total_nodes, nodes_by_level, nodes_by_route, pending_count, max_level
         pass
+
+
+MemoryLayer = Memory

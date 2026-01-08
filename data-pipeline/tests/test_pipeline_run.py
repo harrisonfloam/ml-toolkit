@@ -1,9 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-
-from pipeline.runner import Pipeline
-from pipeline.types import DatasetSpec, PipelineConfig, RunContext
+from data_pipeline.runner import Pipeline
+from data_pipeline.types import DatasetSpec, PipelineConfig, RunContext
 
 
 def test_run_writes_output_and_manifest(tmp_path: Path) -> None:

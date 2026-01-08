@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from pipeline.registry import DatasetRegistry
-from pipeline.types import DatasetSpec, PipelineConfig
+from data_pipeline.registry import DatasetRegistry
+from data_pipeline.types import DatasetSpec, PipelineConfig
 
 
 def test_resolve_path(tmp_path: Path) -> None:

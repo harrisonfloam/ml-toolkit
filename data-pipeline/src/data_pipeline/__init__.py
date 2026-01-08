@@ -1,7 +1,7 @@
 """Minimal staged data pipeline framework."""
 
-from pipeline.runner import Pipeline
-from pipeline.types import DatasetSpec, PipelineConfig, RunContext
+from data_pipeline.runner import Pipeline
+from data_pipeline.types import DatasetSpec, PipelineConfig, RunContext
 
 __all__ = [
     "DatasetSpec",

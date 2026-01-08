@@ -1,9 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-
-from pipeline.io import load, save
-from pipeline.types import DatasetSpec
+from data_pipeline.io import load, save
+from data_pipeline.types import DatasetSpec
 
 
 def test_csv_round_trip(tmp_path: Path) -> None:

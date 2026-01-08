@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from pipeline.types import DatasetSpec
+from data_pipeline.types import DatasetSpec
 
 
 def load(spec: DatasetSpec, path: Path) -> Any:
