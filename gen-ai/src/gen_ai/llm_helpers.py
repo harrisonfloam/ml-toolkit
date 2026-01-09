@@ -599,10 +599,17 @@ def _handle_chat_attempt(
         raise ValueError("LLM returned no choices")
 
     if response.choices[0].finish_reason == "length" and attempt < retries:
+        logger.debug(
+            f"Retrying LLM request [{attempt + 1}/{retries}] due to finish_reason='length' (truncated output)"
+        )
+        messages = [
+            {"role": "system", "content": "Be more concise."},
+            *current_messages,
+        ]
         return (
             False,
             None,
-            [*current_messages, {"role": "system", "content": "Be more concise."}],
+            messages,
         )
 
     if response_model is not None:
@@ -614,17 +621,27 @@ def _handle_chat_attempt(
                 snippet = _truncate_error_snippet(
                     str(e), max_len=_ERROR_SNIPPET_MAX_LEN
                 )
+                # Drop url reference lines to save tokens, e.g., 'For further information visit https://errors.pydantic.dev/2.12/v/less_than_equal'
+                snippet = "\n".join(
+                    line
+                    for line in snippet.splitlines()
+                    if not line.lstrip().startswith("For further information visit ")
+                ).strip()
+                logger.debug(
+                    f"Retrying LLM request [{attempt + 1}/{retries}] due to structured validation error: {snippet}"
+                )
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "Return ONLY valid JSON that matches the requested schema."
+                        f"Previous error: {snippet}",
+                    },
+                    *current_messages,
+                ]
                 return (
                     False,
                     None,
-                    [
-                        *current_messages,
-                        {
-                            "role": "system",
-                            "content": "Return ONLY valid JSON that matches the requested schema. "
-                            f"Previous error: {snippet}",
-                        },
-                    ],
+                    messages,
                 )
             raise
 
