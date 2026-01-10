@@ -10,6 +10,10 @@ A personal framework for data processing that works for any sequence-like struct
 
 GenAI utilities and helpers.
 
+## [ai-embodiment](/ai-embodiment/)
+
+Agent loop and embodiment primitives.
+
 ## [memory-layer](/memory-layer/)
 
 Simple recursive text-based memory management.
