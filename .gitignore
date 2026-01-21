@@ -1,5 +1,5 @@
 # Project specific files
-/notebooks
+.serena
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
