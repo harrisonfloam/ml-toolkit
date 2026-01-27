@@ -2,23 +2,23 @@
 
 A collection of reusable AI / ML components and related projects.
 
-## [gen-ai](/gen-ai/)
+## [gen-ai](src/ml_toolkit/gen_ai/README.md)
 
 Standardized GenAI utilities and helpers.
 
-## [quiz-generator](/quiz-generator/)
+## [quiz-generator](src/ml_toolkit/quiz_generator/README.md)
 
 Generate quizzes from research papers using agentic tool calling.
 
-## [ai-embodiment](/ai-embodiment/)
+## [ai-embodiment](src/ml_toolkit/ai_embodiment/README.md)
 
 Agent loop and embodiment primitives.
 
-## [data-pipeline](/data-pipeline/)
+## [data-pipeline](src/ml_toolkit/data_pipeline/README.md)
 
 Building blocks for data ingestion, transforms, and pipeline execution.
 
-## [memory-layer](/memory-layer/)
+## [memory-layer](src/ml_toolkit/memory_layer/README.md)
 
 Simple recursive text-based memory management.
 
@@ -26,11 +26,23 @@ Simple recursive text-based memory management.
 
 ## Installation and development
 
-Install [uv](https://docs.astral.sh/uv/), then run `uv sync` at the repo root to create/update the shared environment and install all workspace members.
+Install [uv](https://docs.astral.sh/uv/), then run `uv sync` at the repo root to create/update the environment and install `ml-toolkit`.
 
-To add new packages for a specific component, use uv from that subdirectory, then update the workspace environment:
+Most functionality lives behind extras (so base installs stay lightweight). For a "full" dev environment:
 
 ```bash
-cd <component> && uv add <pkg>  # update dependencies in /component/pyproject.toml
-uv lock && uv sync  # update /pyproject.toml and install new dependencies in /.venv
+uv sync --all-extras
+```
+
+To install only the dependencies for a specific area, sync the relevant extra(s):
+
+```bash
+uv sync --extra gen-ai --extra quiz-generator
+```
+
+To add a dependency to a specific extra, use uv from the repo root:
+
+```bash
+uv add --optional <extra> <pkg>
+uv lock && uv sync
 ```

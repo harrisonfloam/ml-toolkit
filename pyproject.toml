@@ -8,12 +8,44 @@ version = "0.1.0"
 description = "A collection of reusable AI / ML components and related projects."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-  "gen-ai",
-  "ai-embodiment",
-  "memory-layer",
-  "data-pipeline",
-  "quiz-generator",
+dependencies = []
+
+[project.optional-dependencies]
+gen-ai = [
+  "httpx>=0.28.1",
+  "instructor>=1.11.3",
+  "mistralai>=1.9.11",
+  "numpy>=2.3.3,<2.4.0",
+  "openai>=1.108.2",
+  "pandas>=2.3.2",
+  "pydantic>=2.11.9",
+  "pydantic-settings>=2.10.1",
+  "pytorch-lightning>=2.5.5",
+  "requests>=2.32.5",
+  "torch>=2.8.0",
+  "tqdm>=4.67.1",
+]
+memory-layer = [
+  "networkx>=3.6.1",
+]
+data-pipeline = [
+  "pandas>=2.0",
+  "pyyaml>=6.0",
+]
+quiz-generator = [
+  "agent-framework>=1.0.0b251120",
+  "markitdown[docx,pdf]>=0.1.4",
+  "numpy>=2.3.3,<2.4.0",
+  "openai>=2.14.0",
+  "pandas>=2.3.3",
+  "pydantic>=2.12.5",
+  "pydantic-settings>=2.12.0",
+  "semantic-text-splitter>=0.28.0",
+  "streamlit>=1.52.2",
+  "tqdm>=4.67.1",
+]
+dev = [
+  "pytest>=8.0",
 ]
 
 [tool.uv]
@@ -21,20 +53,8 @@ package = true
 
 [tool.uv.build-backend]
 module-name = "ml_toolkit"
-module-root = ""
+module-root = "src"
 
-[tool.uv.workspace]
-members = [
-  "gen-ai",
-  "ai-embodiment",
-  "memory-layer",
-  "data-pipeline",
-  "quiz-generator",
-]
-
-[tool.uv.sources]
-"gen-ai" = { workspace = true }
-"ai-embodiment" = { workspace = true }
-"memory-layer" = { workspace = true }
-"data-pipeline" = { workspace = true }
-"quiz-generator" = { workspace = true }
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
