@@ -22,7 +22,9 @@ Building blocks for data ingestion, transforms, and pipeline execution.
 
 Simple recursive text-based memory management.
 
-## symbolic-world-modeling
+## [prompts](src/ml_toolkit/prompts/)
+
+My personal custom instructions, prompts, and agent definitions.
 
 ## Installation and development
 
